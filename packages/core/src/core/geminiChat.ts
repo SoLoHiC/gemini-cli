@@ -121,6 +121,37 @@ export function isValidNonThoughtTextPart(part: Part): boolean {
   );
 }
 
+function extractThoughtText(part: Part): string | undefined {
+  if (!part.thought) {
+    return undefined;
+  }
+  if (typeof part.text === 'string') {
+    return part.text;
+  }
+  if (typeof part.thought === 'string') {
+    return part.thought;
+  }
+  return undefined;
+}
+
+function isThoughtOnlyHistoryPart(part: Part): boolean {
+  if (!part || typeof part !== 'object') {
+    return false;
+  }
+  if ('thought' in part && part.thought) {
+    return true;
+  }
+  return (
+    typeof part.text === 'string' &&
+    'thoughtSignature' in part &&
+    typeof part.thoughtSignature === 'string' &&
+    !part.functionCall &&
+    !part.functionResponse &&
+    !part.inlineData &&
+    !part.fileData
+  );
+}
+
 function isValidContent(content: Content): boolean {
   if (content.parts === undefined || content.parts.length === 0) {
     return false;
@@ -775,20 +806,29 @@ export class GeminiChat {
   }
 
   stripThoughtsFromHistory(): void {
-    this.history = this.history.map((content) => {
-      const newContent = { ...content };
-      if (newContent.parts) {
-        newContent.parts = newContent.parts.map((part) => {
-          if (part && typeof part === 'object' && 'thoughtSignature' in part) {
-            const newPart = { ...part };
-            delete (newPart as { thoughtSignature?: string }).thoughtSignature;
-            return newPart;
-          }
-          return part;
-        });
-      }
-      return newContent;
-    });
+    this.history = this.history
+      .map((content) => {
+        const newContent = { ...content };
+        if (newContent.parts) {
+          newContent.parts = newContent.parts
+            .filter((part) => !isThoughtOnlyHistoryPart(part))
+            .map((part) => {
+              if (
+                part &&
+                typeof part === 'object' &&
+                'thoughtSignature' in part
+              ) {
+                const newPart = { ...part };
+                delete (newPart as { thoughtSignature?: string })
+                  .thoughtSignature;
+                return newPart;
+              }
+              return part;
+            });
+        }
+        return newContent;
+      })
+      .filter((content) => content.parts && content.parts.length > 0);
   }
 
   // To ensure our requests validate, the first function call in every model
@@ -879,7 +919,7 @@ export class GeminiChat {
     streamResponse: AsyncGenerator<GenerateContentResponse>,
     originalRequest: GenerateContentParameters,
   ): AsyncGenerator<GenerateContentResponse> {
-    const modelResponseParts: Part[] = [];
+    const allModelParts: Part[] = [];
 
     let hasToolCall = false;
     let hasThoughts = false;
@@ -906,9 +946,7 @@ export class GeminiChat {
             hasToolCall = true;
           }
 
-          modelResponseParts.push(
-            ...content.parts.filter((part) => !part.thought),
-          );
+          allModelParts.push(...content.parts);
         }
       }
 
@@ -946,7 +984,33 @@ export class GeminiChat {
       }
     }
 
-    // String thoughts and consolidate text parts.
+    const thoughtText = allModelParts
+      .map(extractThoughtText)
+      .filter((text): text is string => typeof text === 'string')
+      .join('')
+      .trim();
+    const thoughtSignature = allModelParts.find(
+      (part) =>
+        part.thought &&
+        'thoughtSignature' in part &&
+        typeof part.thoughtSignature === 'string' &&
+        part.thoughtSignature.length > 0,
+    )?.thoughtSignature;
+
+    let thoughtContentPart: Part | undefined;
+    if (thoughtText || thoughtSignature) {
+      thoughtContentPart = {
+        text: thoughtText,
+        thought: true,
+      };
+      if (thoughtSignature) {
+        thoughtContentPart.thoughtSignature = thoughtSignature;
+      }
+    }
+
+    const modelResponseParts = allModelParts.filter((part) => !part.thought);
+
+    // String thoughts and consolidate non-thought text parts.
     const consolidatedParts: Part[] = [];
     for (const part of modelResponseParts) {
       const lastPart = consolidatedParts[consolidatedParts.length - 1];
@@ -1013,7 +1077,13 @@ export class GeminiChat {
       }
     }
 
-    this.history.push({ role: 'model', parts: consolidatedParts });
+    this.history.push({
+      role: 'model',
+      parts: [
+        ...(thoughtContentPart ? [thoughtContentPart] : []),
+        ...consolidatedParts,
+      ],
+    });
   }
 
   getLastPromptTokenCount(): number {
@@ -1072,9 +1142,9 @@ export class GeminiChat {
     }
 
     const thoughtPart = content.parts[0];
-    if (thoughtPart.text) {
+    const rawText = extractThoughtText(thoughtPart);
+    if (rawText) {
       // Extract subject and description using the same logic as turn.ts
-      const rawText = thoughtPart.text;
       const subjectStringMatches = rawText.match(/\*\*(.*?)\*\*/s);
       const subject = subjectStringMatches
         ? subjectStringMatches[1].trim()

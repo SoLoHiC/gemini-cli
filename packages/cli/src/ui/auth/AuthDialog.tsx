@@ -18,11 +18,15 @@ import {
   AuthType,
   clearCachedCredentialFile,
   type Config,
+  isAnthropicAuthType,
+  isOpenAIAuthType,
+  isProviderAuthType,
 } from '@google/gemini-cli-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { AuthState } from '../types.js';
 import { validateAuthMethodWithSettings } from './useAuth.js';
 import { relaunchApp } from '../../utils/processUtils.js';
+import { parseAuthType } from '../../config/auth.js';
 
 interface AuthDialogProps {
   config: Config;
@@ -42,6 +46,44 @@ export function AuthDialog({
   setAuthContext,
 }: AuthDialogProps): React.JSX.Element {
   const [exiting, setExiting] = useState(false);
+  const ensureProviderModel = useCallback(
+    (authType: AuthType): string | null => {
+      const providerKey = isOpenAIAuthType(authType)
+        ? 'openai'
+        : isAnthropicAuthType(authType)
+          ? 'anthropic'
+          : undefined;
+      if (!providerKey) {
+        return null;
+      }
+
+      const configuredModels =
+        settings.merged.modelProviders?.[providerKey] ?? [];
+      const currentModel = settings.merged.model?.name;
+      const currentModelMatchesProvider = configuredModels.some(
+        (entry) => entry.id === currentModel,
+      );
+      const envModel =
+        process.env[
+          providerKey === 'openai' ? 'OPENAI_MODEL' : 'ANTHROPIC_MODEL'
+        ];
+
+      if (!currentModelMatchesProvider && configuredModels[0]?.id) {
+        config.setModel(configuredModels[0].id, false);
+      }
+
+      if (
+        !currentModelMatchesProvider &&
+        !configuredModels[0]?.id &&
+        !envModel
+      ) {
+        return `No model configured for ${providerKey}. Set --model, ${providerKey === 'openai' ? 'OPENAI_MODEL' : 'ANTHROPIC_MODEL'}, settings.model.name, or modelProviders.${providerKey}.`;
+      }
+
+      return null;
+    },
+    [config, settings],
+  );
   let items = [
     {
       label: 'Sign in with Google',
@@ -75,28 +117,40 @@ export function AuthDialog({
       value: AuthType.USE_VERTEX_AI,
       key: AuthType.USE_VERTEX_AI,
     },
+    {
+      label: 'OpenAI API Key',
+      value: AuthType.USE_OPENAI,
+      key: AuthType.USE_OPENAI,
+    },
+    {
+      label: 'Anthropic API Key',
+      value: AuthType.USE_ANTHROPIC,
+      key: AuthType.USE_ANTHROPIC,
+    },
   ];
 
-  if (settings.merged.security.auth.enforcedType) {
-    items = items.filter(
-      (item) => item.value === settings.merged.security.auth.enforcedType,
-    );
+  const enforcedType = parseAuthType(
+    settings.merged.security.auth.enforcedType,
+  );
+
+  if (enforcedType) {
+    items = items.filter((item) => item.value === enforcedType);
   }
 
   let defaultAuthType = null;
-  const defaultAuthTypeEnv = process.env['GEMINI_DEFAULT_AUTH_TYPE'];
-  if (
-    defaultAuthTypeEnv &&
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-    Object.values(AuthType).includes(defaultAuthTypeEnv as AuthType)
-  ) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-    defaultAuthType = defaultAuthTypeEnv as AuthType;
+  const defaultAuthTypeEnv = parseAuthType(
+    process.env['GEMINI_DEFAULT_AUTH_TYPE'],
+  );
+  if (defaultAuthTypeEnv) {
+    defaultAuthType = defaultAuthTypeEnv;
   }
 
   let initialAuthIndex = items.findIndex((item) => {
-    if (settings.merged.security.auth.selectedType) {
-      return item.value === settings.merged.security.auth.selectedType;
+    const selectedType = parseAuthType(
+      settings.merged.security.auth.selectedType,
+    );
+    if (selectedType) {
+      return item.value === selectedType;
     }
 
     if (defaultAuthType) {
@@ -106,10 +160,16 @@ export function AuthDialog({
     if (process.env['GEMINI_API_KEY']) {
       return item.value === AuthType.USE_GEMINI;
     }
+    if (process.env['OPENAI_API_KEY']) {
+      return item.value === AuthType.USE_OPENAI;
+    }
+    if (process.env['ANTHROPIC_API_KEY']) {
+      return item.value === AuthType.USE_ANTHROPIC;
+    }
 
     return item.value === AuthType.LOGIN_WITH_GOOGLE;
   });
-  if (settings.merged.security.auth.enforcedType) {
+  if (enforcedType) {
     initialAuthIndex = 0;
   }
 
@@ -119,6 +179,13 @@ export function AuthDialog({
         return;
       }
       if (authType) {
+        const providerModelError = isProviderAuthType(authType)
+          ? ensureProviderModel(authType)
+          : null;
+        if (providerModelError) {
+          onAuthError(providerModelError);
+          return;
+        }
         if (authType === AuthType.LOGIN_WITH_GOOGLE) {
           setAuthContext({ requiresRestart: true });
         } else {
@@ -143,10 +210,22 @@ export function AuthDialog({
           setAuthState(AuthState.AwaitingApiKeyInput);
           return;
         }
+        if (isProviderAuthType(authType)) {
+          setAuthState(AuthState.Unauthenticated);
+          return;
+        }
       }
       setAuthState(AuthState.Unauthenticated);
     },
-    [settings, config, setAuthState, exiting, setAuthContext],
+    [
+      settings,
+      config,
+      setAuthState,
+      exiting,
+      setAuthContext,
+      ensureProviderModel,
+      onAuthError,
+    ],
   );
 
   const handleAuthSelect = (authMethod: AuthType) => {

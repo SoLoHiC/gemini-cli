@@ -24,6 +24,7 @@ import { tokenLimit } from '../core/tokenLimits.js';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { AuthType } from '../core/contentGenerator.js';
 
 vi.mock('../telemetry/loggers.js');
 vi.mock('../utils/environmentContext.js');
@@ -181,6 +182,9 @@ describe('ChatCompressionService', () => {
       }),
       isInteractive: vi.fn().mockReturnValue(false),
       getActiveModel: vi.fn().mockReturnValue(mockModel),
+      getContentGeneratorConfig: vi.fn().mockReturnValue({
+        authType: AuthType.USE_GEMINI,
+      }),
       getContentGenerator: vi.fn().mockReturnValue({
         countTokens: vi.fn().mockResolvedValue({ totalTokens: 100 }),
       }),
@@ -414,6 +418,65 @@ describe('ChatCompressionService', () => {
         .systemInstruction as Part
     ).text;
     expect(firstCallText).not.toContain('### APPROVED PLAN PRESERVATION');
+  });
+
+  it('should use compression aliases for Google auth', async () => {
+    const history: Content[] = [
+      { role: 'user', parts: [{ text: 'msg1' }] },
+      { role: 'model', parts: [{ text: 'msg2' }] },
+      { role: 'user', parts: [{ text: 'msg3' }] },
+      { role: 'model', parts: [{ text: 'msg4' }] },
+    ];
+    vi.mocked(mockChat.getHistory).mockReturnValue(history);
+    vi.mocked(mockChat.getLastPromptTokenCount).mockReturnValue(600000);
+
+    await service.compress(
+      mockChat,
+      mockPromptId,
+      false,
+      mockModel,
+      mockConfig,
+      false,
+    );
+
+    const firstCall = vi.mocked(mockConfig.getBaseLlmClient().generateContent)
+      .mock.calls[0][0];
+    expect(firstCall.modelConfigKey.model).toBe('chat-compression-2.5-pro');
+  });
+
+  it('should use the active provider model for non-Google auth', async () => {
+    const providerModel = 'deepseek-chat';
+    const history: Content[] = [
+      { role: 'user', parts: [{ text: 'msg1' }] },
+      { role: 'model', parts: [{ text: 'msg2' }] },
+      { role: 'user', parts: [{ text: 'msg3' }] },
+      { role: 'model', parts: [{ text: 'msg4' }] },
+    ];
+    vi.mocked(mockChat.getHistory).mockReturnValue(history);
+    vi.mocked(mockChat.getLastPromptTokenCount).mockReturnValue(100000);
+    vi.mocked(tokenLimit).mockImplementation((_, __, type) =>
+      type === 'output' ? 65536 : 131072,
+    );
+    vi.mocked(mockConfig.getActiveModel).mockReturnValue(providerModel);
+    vi.mocked(mockConfig.getContentGeneratorConfig).mockReturnValue({
+      authType: AuthType.USE_OPENAI,
+    });
+
+    await service.compress(
+      mockChat,
+      mockPromptId,
+      false,
+      providerModel,
+      mockConfig,
+      false,
+    );
+
+    const firstCall = vi.mocked(mockConfig.getBaseLlmClient().generateContent)
+      .mock.calls[0][0];
+    const secondCall = vi.mocked(mockConfig.getBaseLlmClient().generateContent)
+      .mock.calls[1][0];
+    expect(firstCall.modelConfigKey.model).toBe(providerModel);
+    expect(secondCall.modelConfigKey.model).toBe(providerModel);
   });
 
   it('should force compress even if under threshold', async () => {

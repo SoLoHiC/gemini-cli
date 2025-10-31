@@ -448,6 +448,7 @@ export class ApiRequestEvent implements BaseTelemetryEvent {
     if (this.prompt.server) {
       attributes['server.address'] = this.prompt.server.address;
       attributes['server.port'] = this.prompt.server.port;
+      attributes['base_url_host'] = this.prompt.server.address;
     }
 
     if (shouldIncludePayloads(config) && this.prompt.contents) {
@@ -545,6 +546,7 @@ export class ApiErrorEvent implements BaseTelemetryEvent {
     if (this.prompt.server) {
       attributes['server.address'] = this.prompt.server.address;
       attributes['server.port'] = this.prompt.server.port;
+      attributes['base_url_host'] = this.prompt.server.address;
     }
 
     if (shouldIncludePayloads(config) && this.prompt.contents) {
@@ -728,6 +730,7 @@ export class ApiResponseEvent implements BaseTelemetryEvent {
     if (this.prompt.server) {
       attributes['server.address'] = this.prompt.server.address;
       attributes['server.port'] = this.prompt.server.port;
+      attributes['base_url_host'] = this.prompt.server.address;
     }
 
     if (shouldIncludePayloads(config) && this.prompt.contents) {

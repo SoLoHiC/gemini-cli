@@ -38,6 +38,7 @@ import { IdeTrustChangeDialog } from './IdeTrustChangeDialog.js';
 import { NewAgentsNotification } from './NewAgentsNotification.js';
 import { AgentConfigDialog } from './AgentConfigDialog.js';
 import { PolicyUpdateDialog } from './PolicyUpdateDialog.js';
+import { parseAuthType } from '../../config/auth.js';
 
 interface DialogManagerProps {
   addItem: UseHistoryManagerReturn['addItem'];
@@ -288,16 +289,21 @@ export const DialogManager = ({
       />
     );
   }
+  const selectedAuthType = parseAuthType(
+    settings.merged.security.auth.selectedType,
+  );
+
   if (uiState.isAwaitingApiKeyInput) {
     return (
       <Box flexDirection="column">
         <ApiAuthDialog
           key={uiState.apiKeyDefaultValue}
+          authType={selectedAuthType}
           onSubmit={uiActions.handleApiKeySubmit}
           onCancel={uiActions.handleApiKeyCancel}
           error={uiState.authError}
           defaultValue={uiState.apiKeyDefaultValue}
-        />
+        />{' '}
       </Box>
     );
   }

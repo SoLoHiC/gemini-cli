@@ -12,6 +12,7 @@ import {
   MIN_TERMINAL_WIDTH_FOR_FULL_LABEL,
   DEFAULT_COMPRESSION_THRESHOLD,
 } from '../constants.js';
+import { useConfig } from '../contexts/ConfigContext.js';
 
 export const ContextUsageDisplay = ({
   promptTokenCount,
@@ -23,7 +24,8 @@ export const ContextUsageDisplay = ({
   terminalWidth: number;
 }) => {
   const settings = useSettings();
-  const percentage = getContextUsagePercentage(promptTokenCount, model);
+  const config = useConfig();
+  const percentage = getContextUsagePercentage(promptTokenCount, model, config);
   const percentageUsed = (percentage * 100).toFixed(0);
 
   const threshold =

@@ -1,0 +1,437 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type OpenAI from 'openai';
+import {
+  type GenerateContentParameters,
+  GenerateContentResponse,
+} from '@google/genai';
+import type { Config } from '../config/config.js';
+import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
+import type { OpenAICompatibleProvider } from './provider/index.js';
+import { OpenAIContentConverter } from './converter.js';
+import type { TelemetryService, RequestContext } from './telemetryService.js';
+import type { ErrorHandler } from './errorHandler.js';
+
+export interface PipelineConfig {
+  cliConfig: Config;
+  provider: OpenAICompatibleProvider;
+  contentGeneratorConfig: ContentGeneratorConfig;
+  telemetryService: TelemetryService;
+  errorHandler: ErrorHandler;
+}
+
+export class ContentGenerationPipeline {
+  client: OpenAI;
+  private converter: OpenAIContentConverter;
+  private contentGeneratorConfig: ContentGeneratorConfig;
+
+  constructor(private config: PipelineConfig) {
+    this.contentGeneratorConfig = config.contentGeneratorConfig;
+    if (!this.contentGeneratorConfig.model) {
+      throw new Error('Model is not defined in the content generator config');
+    }
+    this.client = this.config.provider.buildClient();
+    this.converter = new OpenAIContentConverter(
+      this.contentGeneratorConfig.model,
+    );
+  }
+
+  async execute(
+    request: GenerateContentParameters,
+    userPromptId: string,
+  ): Promise<GenerateContentResponse> {
+    return this.executeWithErrorHandling(
+      request,
+      userPromptId,
+      false,
+      async (openaiRequest, context) => {
+        const openaiResponse = (await this.client.chat.completions.create(
+          openaiRequest,
+          {
+            signal: request.config?.abortSignal,
+          },
+        )) as OpenAI.Chat.ChatCompletion;
+
+        const geminiResponse =
+          this.converter.convertOpenAIResponseToGemini(openaiResponse);
+
+        // Log success
+        await this.config.telemetryService.logSuccess(
+          context,
+          geminiResponse,
+          openaiRequest,
+          openaiResponse,
+        );
+
+        return geminiResponse;
+      },
+    );
+  }
+
+  async executeStream(
+    request: GenerateContentParameters,
+    userPromptId: string,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    return this.executeWithErrorHandling(
+      request,
+      userPromptId,
+      true,
+      async (openaiRequest, context) => {
+        // Stage 1: Create OpenAI stream
+        const stream = (await this.client.chat.completions.create(
+          openaiRequest,
+          {
+            signal: request.config?.abortSignal,
+          },
+        )) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+
+        // Stage 2: Process stream with conversion and logging
+        return this.processStreamWithLogging(
+          stream,
+          context,
+          openaiRequest,
+          request,
+        );
+      },
+    );
+  }
+
+  /**
+   * Stage 2: Process OpenAI stream with conversion and logging
+   * This method handles the complete stream processing pipeline:
+   * 1. Convert OpenAI chunks to Gemini format while preserving original chunks
+   * 2. Filter empty responses
+   * 3. Handle chunk merging for providers that send finishReason and usageMetadata separately
+   * 4. Collect both formats for logging
+   * 5. Handle success/error logging
+   */
+  private async *processStreamWithLogging(
+    stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>,
+    context: RequestContext,
+    openaiRequest: OpenAI.Chat.ChatCompletionCreateParams,
+    request: GenerateContentParameters,
+  ): AsyncGenerator<GenerateContentResponse> {
+    const collectedGeminiResponses: GenerateContentResponse[] = [];
+    const collectedOpenAIChunks: OpenAI.Chat.ChatCompletionChunk[] = [];
+
+    // Reset streaming tool calls to prevent data pollution from previous streams
+    this.converter.resetStreamingToolCalls();
+
+    // State for handling chunk merging
+    let pendingFinishResponse: GenerateContentResponse | null = null;
+
+    try {
+      // Stage 2a: Convert and yield each chunk while preserving original
+      for await (const chunk of stream) {
+        // Always collect OpenAI chunks for logging, regardless of Gemini conversion result
+        collectedOpenAIChunks.push(chunk);
+
+        const response = this.converter.convertOpenAIChunkToGemini(chunk);
+
+        // Stage 2b: Filter empty responses to avoid downstream issues
+        if (
+          response.candidates?.[0]?.content?.parts?.length === 0 &&
+          !response.candidates?.[0]?.finishReason &&
+          !response.usageMetadata
+        ) {
+          continue;
+        }
+
+        // Stage 2c: Handle chunk merging for providers that send finishReason and usageMetadata separately
+        const shouldYield = this.handleChunkMerging(
+          response,
+          collectedGeminiResponses,
+          (mergedResponse) => {
+            pendingFinishResponse = mergedResponse;
+          },
+        );
+
+        if (shouldYield) {
+          // If we have a pending finish response, yield it instead
+          if (pendingFinishResponse) {
+            yield pendingFinishResponse;
+            pendingFinishResponse = null;
+          } else {
+            yield response;
+          }
+        }
+      }
+
+      // Stage 2d: If there's still a pending finish response at the end, yield it
+      if (pendingFinishResponse) {
+        yield pendingFinishResponse;
+      }
+
+      // Stage 2e: Stream completed successfully - perform logging with original OpenAI chunks
+      context.duration = Date.now() - context.startTime;
+
+      await this.config.telemetryService.logStreamingSuccess(
+        context,
+        collectedGeminiResponses,
+        openaiRequest,
+        collectedOpenAIChunks,
+      );
+    } catch (error) {
+      // Clear streaming tool calls on error to prevent data pollution
+      this.converter.resetStreamingToolCalls();
+
+      // Use shared error handling logic
+      await this.handleError(error, context, request);
+    }
+  }
+
+  /**
+   * Handle chunk merging for providers that send finishReason and usageMetadata separately.
+   *
+   * Strategy: When we encounter a finishReason chunk, we hold it and merge all subsequent
+   * chunks into it until the stream ends. This ensures the final chunk contains both
+   * finishReason and the most up-to-date usage information from any provider pattern.
+   *
+   * @param response Current Gemini response
+   * @param collectedGeminiResponses Array to collect responses for logging
+   * @param setPendingFinish Callback to set pending finish response
+   * @returns true if the response should be yielded, false if it should be held for merging
+   */
+  private handleChunkMerging(
+    response: GenerateContentResponse,
+    collectedGeminiResponses: GenerateContentResponse[],
+    setPendingFinish: (response: GenerateContentResponse) => void,
+  ): boolean {
+    const isFinishChunk = response.candidates?.[0]?.finishReason;
+
+    // Check if we have a pending finish response from previous chunks
+    const hasPendingFinish =
+      collectedGeminiResponses.length > 0 &&
+      collectedGeminiResponses[collectedGeminiResponses.length - 1]
+        .candidates?.[0]?.finishReason;
+
+    if (isFinishChunk) {
+      // This is a finish reason chunk
+      collectedGeminiResponses.push(response);
+      setPendingFinish(response);
+      return false; // Don't yield yet, wait for potential subsequent chunks to merge
+    } else if (hasPendingFinish) {
+      // We have a pending finish chunk, merge this chunk's data into it
+      const lastResponse =
+        collectedGeminiResponses[collectedGeminiResponses.length - 1];
+      const mergedResponse = new GenerateContentResponse();
+
+      // Keep the finish reason from the previous chunk
+      mergedResponse.candidates = lastResponse.candidates;
+
+      // Merge usage metadata if this chunk has it
+      if (response.usageMetadata) {
+        mergedResponse.usageMetadata = response.usageMetadata;
+      } else {
+        mergedResponse.usageMetadata = lastResponse.usageMetadata;
+      }
+
+      // Copy other essential properties from the current response
+      mergedResponse.responseId = response.responseId;
+      mergedResponse.createTime = response.createTime;
+      mergedResponse.modelVersion = response.modelVersion;
+      mergedResponse.promptFeedback = response.promptFeedback;
+
+      // Update the collected responses with the merged response
+      collectedGeminiResponses[collectedGeminiResponses.length - 1] =
+        mergedResponse;
+
+      setPendingFinish(mergedResponse);
+      return true; // Yield the merged response
+    }
+
+    // Normal chunk - collect and yield
+    collectedGeminiResponses.push(response);
+    return true;
+  }
+
+  private async buildRequest(
+    request: GenerateContentParameters,
+    userPromptId: string,
+    streaming: boolean = false,
+  ): Promise<OpenAI.Chat.ChatCompletionCreateParams> {
+    const messages = this.converter.convertGeminiRequestToOpenAI(request);
+    const requestConfig = this.buildGenerateContentConfig(request);
+
+    // Apply provider-specific enhancements
+    const baseRequest: OpenAI.Chat.ChatCompletionCreateParams = {
+      model: this.contentGeneratorConfig.model || '',
+      messages,
+      ...requestConfig,
+    };
+
+    // Add streaming options if present
+    if (streaming) {
+      (
+        baseRequest as unknown as OpenAI.Chat.ChatCompletionCreateParamsStreaming
+      ).stream = true;
+      baseRequest.stream_options = { include_usage: true };
+    }
+
+    // Add tools if present
+    if (request.config?.tools) {
+      baseRequest.tools = await this.converter.convertGeminiToolsToOpenAI(
+        request.config.tools,
+      );
+    }
+
+    // Let provider enhance the request (e.g., add metadata, cache control)
+    return this.config.provider.buildRequest(baseRequest, userPromptId);
+  }
+
+  private buildGenerateContentConfig(
+    request: GenerateContentParameters,
+  ): Partial<OpenAI.Chat.ChatCompletionCreateParams> {
+    const samplingParams = this.contentGeneratorConfig.samplingParams;
+    const getValue = <T>(
+      configValue: T | undefined,
+      requestValue: T | undefined,
+    ): T | undefined => {
+      if (configValue !== undefined) {
+        return configValue;
+      }
+      return requestValue;
+    };
+
+    const generatedConfig: Partial<OpenAI.Chat.ChatCompletionCreateParams> = {};
+    const temperature = getValue(
+      samplingParams?.temperature,
+      request.config?.temperature,
+    );
+    const topP = getValue(samplingParams?.top_p, request.config?.topP);
+    const presencePenalty = getValue(
+      samplingParams?.presence_penalty,
+      request.config?.presencePenalty,
+    );
+    const frequencyPenalty = getValue(
+      samplingParams?.frequency_penalty,
+      request.config?.frequencyPenalty,
+    );
+    const maxTokens = getValue(
+      samplingParams?.max_tokens,
+      request.config?.maxOutputTokens,
+    );
+    const stop = request.config?.stopSequences;
+
+    if (temperature !== undefined) {
+      generatedConfig.temperature = temperature;
+    }
+    if (topP !== undefined) {
+      generatedConfig.top_p = topP;
+    }
+    if (presencePenalty !== undefined) {
+      generatedConfig.presence_penalty = presencePenalty;
+    }
+    if (frequencyPenalty !== undefined) {
+      generatedConfig.frequency_penalty = frequencyPenalty;
+    }
+    if (maxTokens !== undefined) {
+      generatedConfig.max_tokens = maxTokens;
+    }
+    if (stop && stop.length > 0) {
+      generatedConfig.stop = stop;
+    }
+
+    return generatedConfig;
+  }
+
+  /**
+   * Common error handling wrapper for execute methods
+   */
+  private async executeWithErrorHandling<T>(
+    request: GenerateContentParameters,
+    userPromptId: string,
+    isStreaming: boolean,
+    executor: (
+      openaiRequest: OpenAI.Chat.ChatCompletionCreateParams,
+      context: RequestContext,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const context = this.createRequestContext(userPromptId, isStreaming);
+
+    try {
+      const openaiRequest = await this.buildRequest(
+        request,
+        userPromptId,
+        isStreaming,
+      );
+
+      const result = await executor(openaiRequest, context);
+
+      context.duration = Date.now() - context.startTime;
+      return result;
+    } catch (error) {
+      // Use shared error handling logic
+      return await this.handleError(
+        error,
+        context,
+        request,
+        userPromptId,
+        isStreaming,
+      );
+    }
+  }
+
+  /**
+   * Shared error handling logic for both executeWithErrorHandling and processStreamWithLogging
+   * This centralizes the common error processing steps to avoid duplication
+   */
+  private async handleError(
+    error: unknown,
+    context: RequestContext,
+    request: GenerateContentParameters,
+    userPromptId?: string,
+    isStreaming?: boolean,
+  ): Promise<never> {
+    context.duration = Date.now() - context.startTime;
+
+    // Build request for logging (may fail, but we still want to log the error)
+    let openaiRequest: OpenAI.Chat.ChatCompletionCreateParams;
+    try {
+      if (userPromptId !== undefined && isStreaming !== undefined) {
+        openaiRequest = await this.buildRequest(
+          request,
+          userPromptId,
+          isStreaming,
+        );
+      } else {
+        // For processStreamWithLogging, we don't have userPromptId/isStreaming,
+        // so create a minimal request
+        openaiRequest = {
+          model: this.contentGeneratorConfig.model || 'unknown',
+          messages: [],
+        };
+      }
+    } catch (_buildError) {
+      // If we can't build the request, create a minimal one for logging
+      openaiRequest = {
+        model: this.contentGeneratorConfig.model || 'unknown',
+        messages: [],
+      };
+    }
+
+    await this.config.telemetryService.logError(context, error, openaiRequest);
+    this.config.errorHandler.handle(error, context, request);
+  }
+
+  /**
+   * Create request context with common properties
+   */
+  private createRequestContext(
+    userPromptId: string,
+    isStreaming: boolean,
+  ): RequestContext {
+    return {
+      userPromptId,
+      model: this.contentGeneratorConfig.model || 'unknown',
+      authType: this.contentGeneratorConfig.authType || 'unknown',
+      startTime: Date.now(),
+      duration: 0,
+      isStreaming,
+    };
+  }
+}

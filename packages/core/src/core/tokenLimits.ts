@@ -1,33 +1,59 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { Config } from '../config/config.js';
 import {
-  DEFAULT_GEMINI_FLASH_LITE_MODEL,
-  DEFAULT_GEMINI_FLASH_MODEL,
-  DEFAULT_GEMINI_MODEL,
-  PREVIEW_GEMINI_FLASH_MODEL,
-  PREVIEW_GEMINI_MODEL,
-} from '../config/models.js';
+  DEFAULT_INPUT_TOKEN_LIMIT,
+  DEFAULT_OUTPUT_TOKEN_LIMIT,
+  getModelTokenMetadata,
+  normalizeModelId,
+  type ModelTokenMetadata,
+  type TokenLimitType,
+} from './tokenMetadata.js';
 
 type Model = string;
 type TokenCount = number;
 
-export const DEFAULT_TOKEN_LIMIT = 1_048_576;
+export const DEFAULT_TOKEN_LIMIT = DEFAULT_INPUT_TOKEN_LIMIT;
+export { DEFAULT_OUTPUT_TOKEN_LIMIT, normalizeModelId, getModelTokenMetadata };
+export type { ModelTokenMetadata, TokenLimitType };
 
-export function tokenLimit(model: Model): TokenCount {
-  // Add other models as they become relevant or if specified by config
-  // Pulled from https://ai.google.dev/gemini-api/docs/models
-  switch (model) {
-    case PREVIEW_GEMINI_MODEL:
-    case PREVIEW_GEMINI_FLASH_MODEL:
-    case DEFAULT_GEMINI_MODEL:
-    case DEFAULT_GEMINI_FLASH_MODEL:
-    case DEFAULT_GEMINI_FLASH_LITE_MODEL:
-      return 1_048_576;
-    default:
-      return DEFAULT_TOKEN_LIMIT;
+function parseArgs(
+  configOrType?: Config | TokenLimitType,
+  maybeType?: TokenLimitType,
+): { config: Config | undefined; type: TokenLimitType } {
+  if (configOrType === 'input' || configOrType === 'output') {
+    return {
+      config: undefined,
+      type: configOrType,
+    };
   }
+
+  return {
+    config: configOrType,
+    type: maybeType ?? 'input',
+  };
+}
+
+export function tokenLimit(model: Model, type: TokenLimitType): TokenCount;
+export function tokenLimit(model: Model, config?: Config): TokenCount;
+export function tokenLimit(
+  model: Model,
+  config: Config | undefined,
+  type: TokenLimitType,
+): TokenCount;
+export function tokenLimit(
+  model: Model,
+  configOrType?: Config | TokenLimitType,
+  maybeType?: TokenLimitType,
+): TokenCount {
+  const { config, type } = parseArgs(configOrType, maybeType);
+  const metadata = getModelTokenMetadata(model, config);
+
+  return type === 'output'
+    ? metadata.outputTokenLimit
+    : metadata.inputTokenLimit;
 }

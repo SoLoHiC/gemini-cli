@@ -186,6 +186,30 @@ import { ContextBuilder } from '../safety/context-builder.js';
 import { CheckerRegistry } from '../safety/registry.js';
 import { ConsecaSafetyChecker } from '../safety/conseca/conseca.js';
 import type { AgentLoopContext } from './agent-loop-context.js';
+import { DEFAULT_MAX_ATTEMPTS } from '../utils/retry.js';
+import {
+  DEFAULT_FILE_FILTERING_OPTIONS,
+  DEFAULT_MEMORY_FILE_FILTERING_OPTIONS,
+  type FileFilteringOptions,
+} from './constants.js';
+import {
+  DEFAULT_MIN_PRUNABLE_TOKENS_THRESHOLD,
+  DEFAULT_PROTECT_LATEST_TURN,
+  DEFAULT_TOOL_PROTECTION_THRESHOLD,
+} from '../services/toolOutputMaskingService.js';
+
+import {
+  type ExtensionLoader,
+  SimpleExtensionLoader,
+} from '../utils/extensionLoader.js';
+import { McpClientManager } from '../tools/mcp-client-manager.js';
+import { A2AClientManager } from '../agents/a2a-client-manager.js';
+import { type McpContext } from '../tools/mcp-client.js';
+import type { EnvironmentSanitizationConfig } from '../services/environmentSanitization.js';
+import { getErrorMessage } from '../utils/errors.js';
+
+// Re-export OAuth config type
+export type { MCPOAuthConfig, AnyToolInvocation, AnyDeclarativeTool };
 
 export interface AccessibilitySettings {
   /** @deprecated Use ui.statusHints instead. */
@@ -586,6 +610,36 @@ export interface WorktreeSettings {
   baseSha: string;
 }
 
+export interface ProviderGenerationConfig {
+  timeout?: number;
+  maxRetries?: number;
+  retryErrorCodes?: number[];
+  enableCacheControl?: boolean;
+  samplingParams?: ContentGeneratorConfig['samplingParams'];
+  reasoning?: Record<string, unknown>;
+  schemaCompliance?: Record<string, unknown>;
+  contextWindowSize?: number;
+  customHeaders?: Record<string, string>;
+  extra_body?: Record<string, unknown>;
+  modalities?: string[];
+  embeddingModel?: string;
+}
+
+export interface ModelProviderConfig {
+  id: string;
+  name?: string;
+  description?: string;
+  envKey?: string;
+  baseUrl?: string;
+  tokenLimit?: number;
+  generationConfig?: ProviderGenerationConfig;
+}
+
+export interface ModelProvidersConfig {
+  openai?: ModelProviderConfig[];
+  anthropic?: ModelProviderConfig[];
+}
+
 export interface ConfigParameters {
   sessionId: string;
   clientName?: string;
@@ -635,6 +689,8 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   disableLoopDetection?: boolean;
+  providerApiKey?: string;
+  providerBaseUrl?: string;
   maxSessionTurns?: number;
   acpMode?: boolean;
   listSessions?: boolean;
@@ -734,6 +790,7 @@ export interface ConfigParameters {
     adminSkillsEnabled?: boolean;
     agents?: AgentSettings;
   }>;
+  modelProvidersConfig?: ModelProvidersConfig;
   enableConseca?: boolean;
   billing?: {
     overageStrategy?: OverageStrategy;
@@ -821,9 +878,12 @@ export class Config implements McpContext, AgentLoopContext {
   private readonly disableLoopDetection: boolean;
   // null = unknown (quota not fetched); true = has access; false = definitively no access
   private hasAccessToPreviewModel: boolean | null = null;
+  private providerApiKey: string | undefined;
+  private providerBaseUrl: string | undefined;
   private readonly noBrowser: boolean;
   private readonly folderTrust: boolean;
   private ideMode: boolean;
+  private readonly modelProvidersConfig?: ModelProvidersConfig;
 
   private _activeModel: string;
   private readonly maxSessionTurns: number;
@@ -1109,6 +1169,7 @@ export class Config implements McpContext, AgentLoopContext {
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
     this.model = params.model;
+    this.modelProvidersConfig = params.modelProvidersConfig;
     this.disableLoopDetection = params.disableLoopDetection ?? false;
     this._activeModel = params.model;
     this.enableAgents = params.enableAgents ?? true;
@@ -1222,6 +1283,8 @@ export class Config implements McpContext, AgentLoopContext {
       this.isModelSteeringEnabled(),
     );
     ExecutionLifecycleService.setInjectionService(this.injectionService);
+    this.providerApiKey = params.providerApiKey;
+    this.providerBaseUrl = params.providerBaseUrl;
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
     this.acpMode = params.acpMode ?? false;
     this.listSessions = params.listSessions ?? false;
@@ -1413,6 +1476,22 @@ export class Config implements McpContext, AgentLoopContext {
     return this.initialized;
   }
 
+  getProviderApiKey(): string | undefined {
+    return this.providerApiKey;
+  }
+
+  setProviderApiKey(apiKey: string | undefined): void {
+    this.providerApiKey = apiKey;
+  }
+
+  getProviderBaseUrl(): string | undefined {
+    return this.providerBaseUrl;
+  }
+
+  setProviderBaseUrl(baseUrl: string | undefined): void {
+    this.providerBaseUrl = baseUrl;
+  }
+
   /**
    * Dedups initialization requests using a shared promise that is only resolved
    * once.
@@ -1537,6 +1616,7 @@ export class Config implements McpContext, AgentLoopContext {
     baseUrl?: string,
     customHeaders?: Record<string, string>,
   ) {
+    const normalizedAuthMethod = authMethod ?? authMethod;
     // Reset availability service when switching auth
     this.modelAvailabilityService.reset();
 
@@ -1544,7 +1624,7 @@ export class Config implements McpContext, AgentLoopContext {
     // thoughtSignature from Genai to Vertex will fail, we need to strip them
     if (
       this.contentGeneratorConfig?.authType === AuthType.USE_GEMINI &&
-      authMethod !== AuthType.USE_GEMINI
+      normalizedAuthMethod !== AuthType.USE_GEMINI
     ) {
       // Restore the conversation history to the new client
       this._geminiClient.stripThoughtsFromHistory();
@@ -1558,10 +1638,13 @@ export class Config implements McpContext, AgentLoopContext {
     if (this.contentGeneratorConfig) {
       this.contentGeneratorConfig.authType = undefined;
     }
+    if (apiKey !== undefined) {
+      this.providerApiKey = apiKey;
+    }
 
     const newContentGeneratorConfig = await createContentGeneratorConfig(
       this,
-      authMethod,
+      normalizedAuthMethod,
       apiKey,
       baseUrl,
       customHeaders,
@@ -1850,6 +1933,10 @@ export class Config implements McpContext, AgentLoopContext {
 
   getModel(): string {
     return this.model;
+  }
+
+  getModelProvidersConfig(): ModelProvidersConfig | undefined {
+    return this.modelProvidersConfig;
   }
 
   getDisableLoopDetection(): boolean {
@@ -2479,7 +2566,7 @@ export class Config implements McpContext, AgentLoopContext {
       sections.push(`<project_context>\n${project.trim()}\n</project_context>`);
     }
     if (sections.length === 0) return '';
-    return `\n<loaded_context>\n${sections.join('\n')}\n</loaded_context>`;
+    return `<loaded_context>\n${sections.join('\n')}\n</loaded_context>`;
   }
 
   getGlobalMemory(): string {
@@ -3476,10 +3563,31 @@ export class Config implements McpContext, AgentLoopContext {
   }
 
   getTruncateToolOutputThreshold(): number {
+    const inputLimit = tokenLimit(this.model, this);
+    const authType = this.getContentGeneratorConfig?.()?.authType;
+    const configuredMaxTokens =
+      this.getContentGeneratorConfig?.()?.samplingParams?.max_tokens;
+    const reservedCompletionTokens =
+      !authType || isGoogleAuthType(authType)
+        ? 0
+        : typeof configuredMaxTokens === 'number' && configuredMaxTokens > 0
+          ? Math.min(
+              configuredMaxTokens,
+              tokenLimit(this.model, this, 'output'),
+            )
+          : tokenLimit(this.model, this, 'output');
+    const effectiveContextLimit = Math.max(
+      1,
+      inputLimit - reservedCompletionTokens,
+    );
+
     return Math.min(
       // Estimate remaining context window in characters (1 token ~= 4 chars).
       4 *
-        (tokenLimit(this.model) - uiTelemetryService.getLastPromptTokenCount()),
+        Math.max(
+          0,
+          effectiveContextLimit - uiTelemetryService.getLastPromptTokenCount(),
+        ),
       this.truncateToolOutputThreshold,
     );
   }

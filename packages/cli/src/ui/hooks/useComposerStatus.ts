@@ -13,6 +13,7 @@ import { type HistoryItemToolGroup, StreamingState } from '../types.js';
 import { INTERACTIVE_SHELL_WAITING_PHRASE } from './usePhraseCycler.js';
 import { isContextUsageHigh } from '../utils/contextUsage.js';
 import { theme } from '../semantic-colors.js';
+import { useConfig } from '../contexts/ConfigContext.js';
 
 /**
  * A hook that encapsulates complex status and action-required logic for the Composer.
@@ -85,6 +86,7 @@ export const useComposerStatus = () => {
   const showMinimalContext = isContextUsageHigh(
     uiState.sessionStats.lastPromptTokenCount,
     uiState.currentModel,
+    useConfig(),
     settings.merged.model?.compressionThreshold,
   );
 

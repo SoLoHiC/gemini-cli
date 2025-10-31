@@ -22,6 +22,7 @@ import {
   type CustomTheme,
   type SandboxConfig,
   type VertexAiRoutingConfig,
+  type ModelProvidersConfig,
 } from '@google/gemini-cli-core';
 import type { SessionRetentionSettings } from './settings.js';
 import { DEFAULT_MIN_RETENTION } from '../utils/sessionCleanup.js';
@@ -1048,7 +1049,7 @@ const SETTINGS_SCHEMA = {
         category: 'Model',
         requiresRestart: false,
         default: undefined as string | undefined,
-        description: 'The Gemini model to use for conversations.',
+        description: 'The active model to use for conversations.',
         showInDialog: true,
       },
       maxSessionTurns: {
@@ -1221,6 +1222,17 @@ const SETTINGS_SCHEMA = {
         },
       },
     },
+  },
+
+  modelProviders: {
+    type: 'object',
+    label: 'Model Providers',
+    category: 'Model',
+    requiresRestart: true,
+    default: {} as ModelProvidersConfig,
+    description:
+      'Provider-scoped model configuration for OpenAI and Anthropic compatible models.',
+    showInDialog: false,
   },
 
   agents: {
@@ -1961,6 +1973,26 @@ const SETTINGS_SCHEMA = {
             requiresRestart: true,
             default: undefined as boolean | undefined,
             description: 'Whether to use an external authentication flow.',
+            showInDialog: false,
+          },
+          apiKey: {
+            type: 'string',
+            label: 'Provider API Key',
+            category: 'Security',
+            requiresRestart: true,
+            default: undefined as string | undefined,
+            description:
+              'Manual API key for OpenAI or Anthropic compatible providers.',
+            showInDialog: false,
+          },
+          baseUrl: {
+            type: 'string',
+            label: 'Provider Base URL',
+            category: 'Security',
+            requiresRestart: true,
+            default: undefined as string | undefined,
+            description:
+              'Optional base URL override for OpenAI or Anthropic compatible providers.',
             showInDialog: false,
           },
         },

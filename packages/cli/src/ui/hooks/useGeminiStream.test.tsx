@@ -3212,6 +3212,87 @@ describe('useGeminiStream', () => {
       );
     });
 
+    it('merges streaming thought chunks into one history item in full mode', async () => {
+      const fullThinkingSettings: LoadedSettings = {
+        ...mockLoadedSettings,
+        merged: {
+          ...mockLoadedSettings.merged,
+          ui: { inlineThinkingMode: 'full' },
+        },
+      } as unknown as LoadedSettings;
+
+      mockSendMessageStream.mockReturnValue(
+        (async function* () {
+          yield {
+            type: ServerGeminiEventType.Thought,
+            value: {
+              subject: '',
+              description: '用户',
+              rawText: '用户',
+            },
+          };
+          yield {
+            type: ServerGeminiEventType.Thought,
+            value: {
+              subject: '',
+              description: '想要',
+              rawText: '想要',
+            },
+          };
+          yield {
+            type: ServerGeminiEventType.Thought,
+            value: {
+              subject: '',
+              description: '更深入地了解双模',
+              rawText: '更深入地了解双模',
+            },
+          };
+          yield {
+            type: ServerGeminiEventType.Content,
+            value: 'Response',
+          };
+        })(),
+      );
+
+      const { result } = await renderHookWithProviders(() =>
+        useGeminiStream(
+          new MockedGeminiClientClass(mockConfig),
+          [],
+          mockAddItem,
+          mockConfig,
+          fullThinkingSettings,
+          mockOnDebugMessage,
+          mockHandleSlashCommand,
+          false,
+          () => 'vscode' as EditorType,
+          () => {},
+          () => Promise.resolve(),
+          false,
+          () => {},
+          () => {},
+          () => {},
+          80,
+          24,
+        ),
+      );
+
+      await act(async () => {
+        await result.current.submitQuery('Test query');
+      });
+
+      const thinkingCalls = mockAddItem.mock.calls.filter(
+        ([item]) => item?.type === 'thinking',
+      );
+
+      expect(thinkingCalls).toHaveLength(1);
+      expect(thinkingCalls[0]?.[0]).toMatchObject({
+        type: 'thinking',
+        thought: expect.objectContaining({
+          description: '用户想要更深入地了解双模',
+        }),
+      });
+    });
+
     it('keeps thought transient and clears it on first non-thought event', async () => {
       mockSendMessageStream.mockReturnValue(
         (async function* () {

@@ -141,6 +141,9 @@ export async function loadConfig(
       fileService,
       extensionLoader,
       folderTrust,
+      'tree',
+      undefined,
+      200,
     );
   configParams.userMemory = memoryContent;
   configParams.geminiMdFileCount = fileCount;

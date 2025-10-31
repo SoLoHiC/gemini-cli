@@ -24,6 +24,7 @@ import {
   FileDiscoveryService,
   resolveTelemetrySettings,
   FatalConfigError,
+  getAuthTypeFromEnv,
   getPty,
   debugLogger,
   loadServerHierarchicalMemory,
@@ -37,6 +38,8 @@ import {
   isHeadlessMode,
   Config,
   resolveToRealPath,
+  isOpenAIAuthType,
+  isAnthropicAuthType,
   applyAdminAllowlist,
   applyRequiredServers,
   getAdminBlockedMcpServersMessage,
@@ -48,6 +51,9 @@ import {
   type OutputFormat,
   detectIdeFromEnv,
   generalistProfile,
+  type AuthType,
+  type ModelProvidersConfig,
+  type ModelProviderConfig,
 } from '@google/gemini-cli-core';
 import {
   type Settings,
@@ -57,6 +63,7 @@ import {
   isWorktreeEnabled,
   type LoadedSettings,
 } from './settings.js';
+import { parseAuthType } from './auth.js';
 
 import { loadSandboxConfig } from './sandboxConfig.js';
 import { resolvePath } from '../utils/resolvePath.js';
@@ -520,6 +527,122 @@ export interface LoadCliConfigOptions {
   worktreeSettings?: WorktreeSettings;
 }
 
+function getProviderKey(
+  authType?: AuthType,
+): keyof ModelProvidersConfig | undefined {
+  if (isOpenAIAuthType(authType)) {
+    return 'openai';
+  }
+  if (isAnthropicAuthType(authType)) {
+    return 'anthropic';
+  }
+  return undefined;
+}
+
+function findModelInProviders(
+  modelId: string,
+  modelProviders: ModelProvidersConfig | undefined,
+  authType: AuthType,
+): ModelProviderConfig | undefined {
+  const providerKey = getProviderKey(authType);
+  if (!providerKey || !modelProviders) {
+    return undefined;
+  }
+
+  const providerEntries = modelProviders[providerKey];
+  if (!Array.isArray(providerEntries)) {
+    return undefined;
+  }
+
+  return providerEntries.find((entry) => entry.id === modelId);
+}
+
+function getProviderModels(
+  modelProviders: ModelProvidersConfig | undefined,
+  authType: AuthType,
+): ModelProviderConfig[] {
+  const providerKey = getProviderKey(authType);
+  if (!providerKey || !modelProviders) {
+    return [];
+  }
+
+  const providerEntries = modelProviders[providerKey];
+  return Array.isArray(providerEntries) ? providerEntries : [];
+}
+
+function getProviderEnvModelKey(authType: AuthType): string {
+  return isOpenAIAuthType(authType) ? 'OPENAI_MODEL' : 'ANTHROPIC_MODEL';
+}
+
+function isGeminiLikeModel(model: string | undefined): boolean {
+  if (!model) {
+    return false;
+  }
+  const normalized = model.toLowerCase();
+  return (
+    normalized.startsWith('gemini') ||
+    normalized.startsWith('auto') ||
+    model === GEMINI_MODEL_ALIAS_AUTO
+  );
+}
+
+function resolveInitialModel(
+  argvModel: string | undefined,
+  settings: MergedSettings,
+): string {
+  const selectedAuthType =
+    parseAuthType(settings.security.auth.selectedType) ?? getAuthTypeFromEnv();
+
+  if (
+    !selectedAuthType ||
+    (!isOpenAIAuthType(selectedAuthType) &&
+      !isAnthropicAuthType(selectedAuthType))
+  ) {
+    const specifiedModel =
+      argvModel || process.env['GEMINI_MODEL'] || settings.model?.name;
+    const defaultModel = PREVIEW_GEMINI_MODEL_AUTO;
+    return specifiedModel === GEMINI_MODEL_ALIAS_AUTO
+      ? defaultModel
+      : specifiedModel || defaultModel;
+  }
+
+  const providerModels = getProviderModels(
+    settings.modelProviders,
+    selectedAuthType,
+  );
+  const providerEnvModel =
+    process.env[getProviderEnvModelKey(selectedAuthType)];
+  const settingsModel = settings.model?.name;
+
+  // 检查 settings 中的模型是否在 provider 的模型列表中
+  const settingsModelInProviders = settingsModel
+    ? findModelInProviders(
+        settingsModel,
+        settings.modelProviders,
+        selectedAuthType,
+      ) !== undefined
+    : false;
+
+  const canReuseSettingsModel =
+    !!settingsModel &&
+    !isGeminiLikeModel(settingsModel) &&
+    settingsModelInProviders;
+
+  const resolvedModel =
+    argvModel ||
+    providerEnvModel ||
+    (canReuseSettingsModel ? settingsModel : undefined) ||
+    providerModels[0]?.id;
+
+  if (!resolvedModel) {
+    throw new FatalConfigError(
+      `No model configured for ${selectedAuthType}. Set --model, ${getProviderEnvModelKey(selectedAuthType)}, settings.model.name, or modelProviders.${getProviderKey(selectedAuthType)}.`,
+    );
+  }
+
+  return resolvedModel;
+}
+
 export async function loadCliConfig(
   settings: MergedSettings,
   sessionId: string,
@@ -800,14 +923,7 @@ export async function loadCliConfig(
     interactive,
   );
 
-  const defaultModel = PREVIEW_GEMINI_MODEL_AUTO;
-  const specifiedModel =
-    argv.model || process.env['GEMINI_MODEL'] || settings.model?.name;
-
-  const resolvedModel =
-    specifiedModel === GEMINI_MODEL_ALIAS_AUTO
-      ? defaultModel
-      : specifiedModel || defaultModel;
+  const resolvedModel = resolveInitialModel(argv.model, settings);
   const sandboxConfig = await loadSandboxConfig(settings, argv);
   if (sandboxConfig) {
     const existingPaths = sandboxConfig.allowedPaths || [];
@@ -972,8 +1088,10 @@ export async function loadCliConfig(
     fileDiscoveryService: fileService,
     bugCommand: settings.advanced?.bugCommand,
     model: resolvedModel,
+    modelProvidersConfig: settings.modelProviders,
     maxSessionTurns: settings.model?.maxSessionTurns,
-
+    providerApiKey: settings.security?.auth?.apiKey,
+    providerBaseUrl: settings.security?.auth?.baseUrl,
     listExtensions: argv.listExtensions || false,
     listSessions: argv.listSessions || false,
     deleteSession: argv.deleteSession,

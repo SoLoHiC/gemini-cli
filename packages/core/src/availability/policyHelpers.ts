@@ -6,6 +6,7 @@
 
 import type { GenerateContentConfig } from '@google/genai';
 import type { Config } from '../config/config.js';
+import { isProviderAuthType } from '../core/contentGenerator.js';
 import type {
   FailureKind,
   FallbackAction,
@@ -44,6 +45,11 @@ export function resolvePolicyChain(
   const modelFromConfig =
     preferredModel ?? config.getActiveModel?.() ?? config.getModel();
   const configuredModel = config.getModel();
+  const authType = config.getContentGeneratorConfig?.()?.authType;
+
+  if (isProviderAuthType(authType)) {
+    return createSingleModelChain(modelFromConfig);
+  }
 
   let chain: ModelPolicyChain | undefined;
   const useGemini31 = config.getGemini31LaunchedSync?.() ?? false;

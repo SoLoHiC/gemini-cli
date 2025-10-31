@@ -41,7 +41,7 @@ import type {
   ChatRecordingService,
   ResumedSessionData,
 } from '../services/chatRecordingService.js';
-import type { ContentGenerator } from './contentGenerator.js';
+import { isGoogleAuthType, type ContentGenerator } from './contentGenerator.js';
 import { LoopDetectionService } from '../services/loopDetectionService.js';
 import { ChatCompressionService } from '../context/chatCompressionService.js';
 import { AgentHistoryProvider } from '../context/agentHistoryProvider.js';
@@ -74,6 +74,24 @@ import {
 import { getDisplayString, resolveModel } from '../config/models.js';
 import { partToString } from '../utils/partUtils.js';
 import { coreEvents, CoreEvent } from '../utils/events.js';
+
+function getEffectiveContextLimit(config: Config, model: string): number {
+  const inputLimit = tokenLimit(model, config);
+  const authType = config.getContentGeneratorConfig?.()?.authType;
+
+  if (!authType || isGoogleAuthType(authType)) {
+    return inputLimit;
+  }
+
+  const configuredMaxTokens =
+    config.getContentGeneratorConfig?.()?.samplingParams?.max_tokens;
+  const reservedCompletionTokens =
+    typeof configuredMaxTokens === 'number' && configuredMaxTokens > 0
+      ? Math.min(configuredMaxTokens, tokenLimit(model, config, 'output'))
+      : tokenLimit(model, config, 'output');
+
+  return Math.max(1, inputLimit - reservedCompletionTokens);
+}
 
 const MAX_TURNS = 100;
 
@@ -633,8 +651,11 @@ export class GeminiClient {
       }
     }
 
-    const remainingTokenCount =
-      tokenLimit(modelForLimitCheck) - this.getChat().getLastPromptTokenCount();
+    const remainingTokenCount = Math.max(
+      0,
+      getEffectiveContextLimit(this.config, modelForLimitCheck) -
+        this.getChat().getLastPromptTokenCount(),
+    );
 
     await this.tryMaskToolOutputs(this.getHistory());
 
