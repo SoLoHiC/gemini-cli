@@ -579,11 +579,12 @@ describe('GeminiChat', () => {
       const modelTurn = history[1];
       expect(modelTurn.role).toBe('model');
 
-      // CRUCIAL ASSERTION:
-      // The buggy code would fail here, resulting in parts.length being 0.
-      // The corrected code will pass, preserving the single visible text part.
-      expect(modelTurn?.parts?.length).toBe(1);
-      expect(modelTurn?.parts![0].text).toBe(
+      expect(modelTurn?.parts?.length).toBe(2);
+      expect(modelTurn?.parts![0]).toMatchObject({
+        thought: true,
+        text: 'This is a thought.',
+      });
+      expect(modelTurn?.parts![1].text).toBe(
         'This is the visible text that should not be lost.',
       );
     });
@@ -2023,7 +2024,7 @@ describe('GeminiChat', () => {
   });
 
   describe('stripThoughtsFromHistory', () => {
-    it('should strip thought signatures', () => {
+    it('should strip thought parts and signatures', () => {
       chat.setHistory([
         {
           role: 'user',
@@ -2050,10 +2051,7 @@ describe('GeminiChat', () => {
         },
         {
           role: 'model',
-          parts: [
-            { text: 'thinking...' },
-            { functionCall: { name: 'test', args: {} } },
-          ],
+          parts: [{ functionCall: { name: 'test', args: {} } }],
         },
       ]);
     });

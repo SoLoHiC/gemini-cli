@@ -13,31 +13,32 @@ import type {
   EmbedContentResponse,
   GenerateContentConfig,
   GenerateContentParameters,
-  GenerateContentResponseUsageMetadata,
   GenerateContentResponse,
+  GenerateContentResponseUsageMetadata,
 } from '@google/genai';
 import {
+  ApiErrorEvent,
   ApiRequestEvent,
   ApiResponseEvent,
-  ApiErrorEvent,
-  type ServerDetails,
   type ContextBreakdown,
+  type ServerDetails,
 } from '../telemetry/types.js';
 import type { LlmRole } from '../telemetry/llmRole.js';
 import type { Config } from '../config/config.js';
-import type { UserTierId, GeminiUserTier } from '../code_assist/types.js';
+import type { GeminiUserTier, UserTierId } from '../code_assist/types.js';
 import {
   logApiError,
   logApiRequest,
   logApiResponse,
 } from '../telemetry/loggers.js';
 import type { ContentGenerator } from './contentGenerator.js';
+import { isProviderAuthType } from './contentGenerator.js';
 import { CodeAssistServer } from '../code_assist/server.js';
 import { toContents } from '../code_assist/converter.js';
 import { isStructuredError } from '../utils/quotaErrorDetection.js';
 import { runInDevTraceSpan, type SpanMetadata } from '../telemetry/trace.js';
 import { debugLogger } from '../utils/debugLogger.js';
-import { isAbortError, getErrorType } from '../utils/errors.js';
+import { getErrorType, isAbortError } from '../utils/errors.js';
 import {
   GeminiCliOperation,
   GEN_AI_PROMPT_NAME,
@@ -210,6 +211,21 @@ export class LoggingContentGenerator implements ContentGenerator {
     }
 
     const genConfig = this.config.getContentGeneratorConfig();
+    const normalizedAuthType = genConfig?.authType;
+
+    if (genConfig?.baseUrl && isProviderAuthType(normalizedAuthType)) {
+      try {
+        const url = new URL(genConfig.baseUrl);
+        const port = url.port
+          ? parseInt(url.port, 10)
+          : url.protocol === 'https:'
+            ? 443
+            : 80;
+        return { address: url.hostname, port };
+      } catch {
+        return { address: 'unknown', port: 0 };
+      }
+    }
 
     // Case 2: Using an API key for Vertex AI.
     if (genConfig?.vertexai) {

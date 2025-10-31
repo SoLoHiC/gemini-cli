@@ -5,19 +5,23 @@
  */
 
 import {
-  GoogleGenAI,
-  type CountTokensResponse,
-  type GenerateContentResponse,
-  type GenerateContentParameters,
   type CountTokensParameters,
-  type EmbedContentResponse,
+  type CountTokensResponse,
   type EmbedContentParameters,
+  type EmbedContentResponse,
+  type GenerateContentParameters,
+  type GenerateContentResponse,
+  GoogleGenAI,
 } from '@google/genai';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
-import type { Config } from '../config/config.js';
+import type {
+  Config,
+  ModelProviderConfig,
+  ModelProvidersConfig,
+} from '../config/config.js';
 import { loadApiKey } from './apiKeyCredentialStorage.js';
 
-import type { UserTierId, GeminiUserTier } from '../code_assist/types.js';
+import type { GeminiUserTier, UserTierId } from '../code_assist/types.js';
 import { LoggingContentGenerator } from './loggingContentGenerator.js';
 import { InstallationManager } from '../utils/installationManager.js';
 import { FakeContentGenerator } from './fakeContentGenerator.js';
@@ -26,6 +30,9 @@ import { determineSurface } from '../utils/surface.js';
 import { RecordingContentGenerator } from './recordingContentGenerator.js';
 import { getVersion, resolveModel } from '../../index.js';
 import type { LlmRole } from '../telemetry/llmRole.js';
+import { createOpenAIContentGenerator } from '../openai-generator/index.js';
+import { AnthropicContentGenerator } from '../anthropic-generator/anthropicContentGenerator.js';
+import { createAnthropicCompatibleProvider } from '../anthropic-generator/index.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -61,6 +68,31 @@ export enum AuthType {
   LEGACY_CLOUD_SHELL = 'cloud-shell',
   COMPUTE_ADC = 'compute-default-credentials',
   GATEWAY = 'gateway',
+  USE_OPENAI = 'openai',
+  USE_ANTHROPIC = 'anthropic',
+}
+
+export function isGoogleAuthType(authType?: AuthType): boolean {
+  const normalized = authType;
+  return (
+    normalized === AuthType.LOGIN_WITH_GOOGLE ||
+    normalized === AuthType.USE_GEMINI ||
+    normalized === AuthType.USE_VERTEX_AI ||
+    normalized === AuthType.COMPUTE_ADC ||
+    normalized === AuthType.LEGACY_CLOUD_SHELL
+  );
+}
+
+export function isOpenAIAuthType(authType?: AuthType): boolean {
+  return authType === AuthType.USE_OPENAI;
+}
+
+export function isAnthropicAuthType(authType?: AuthType): boolean {
+  return authType === AuthType.USE_ANTHROPIC;
+}
+
+export function isProviderAuthType(authType?: AuthType): boolean {
+  return isOpenAIAuthType(authType) || isAnthropicAuthType(authType);
 }
 
 /**
@@ -81,6 +113,12 @@ export function getAuthTypeFromEnv(): AuthType | undefined {
   if (process.env['GEMINI_API_KEY']) {
     return AuthType.USE_GEMINI;
   }
+  if (process.env['ANTHROPIC_API_KEY']) {
+    return AuthType.USE_ANTHROPIC;
+  }
+  if (process.env['OPENAI_API_KEY']) {
+    return AuthType.USE_OPENAI;
+  }
   if (
     process.env['CLOUD_SHELL'] === 'true' ||
     process.env['GEMINI_CLI_USE_COMPUTE_ADC'] === 'true'
@@ -97,7 +135,113 @@ export type ContentGeneratorConfig = {
   proxy?: string;
   baseUrl?: string;
   customHeaders?: Record<string, string>;
+  model?: string;
+  apiKeyEnvKey?: string;
+  timeout?: number;
+  maxRetries?: number;
+  retryErrorCodes?: number[];
+  enableCacheControl?: boolean;
+  enableOpenAILogging?: boolean;
+  disableCacheControl?: boolean;
+  reasoning?: Record<string, unknown>;
+  schemaCompliance?: Record<string, unknown>;
+  contextWindowSize?: number;
+  extra_body?: Record<string, unknown>;
+  modalities?: string[];
+  providerSubtype?: string;
+  embeddingModel?: string;
+  samplingParams?: {
+    top_p?: number;
+    top_k?: number;
+    repetition_penalty?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    temperature?: number;
+    max_tokens?: number;
+  };
 };
+
+const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
+
+type ProviderDefaults = {
+  apiKeyEnvKey: string;
+  modelEnvKey: string;
+  baseUrlEnvKey: string;
+  defaultBaseUrl: string;
+};
+
+function getProviderKey(
+  authType: AuthType,
+): keyof ModelProvidersConfig | undefined {
+  if (isOpenAIAuthType(authType)) {
+    return 'openai';
+  }
+  if (isAnthropicAuthType(authType)) {
+    return 'anthropic';
+  }
+  return undefined;
+}
+
+function findProviderModelConfig(
+  modelProviders: ModelProvidersConfig | undefined,
+  authType: AuthType,
+  modelName: string | undefined,
+): ModelProviderConfig | undefined {
+  if (!modelName) {
+    return undefined;
+  }
+
+  const providerKey = getProviderKey(authType);
+  if (!providerKey) {
+    return undefined;
+  }
+
+  const providerEntries = modelProviders?.[providerKey];
+  if (!Array.isArray(providerEntries)) {
+    return undefined;
+  }
+
+  return providerEntries.find((entry) => entry.id === modelName);
+}
+
+function getProviderDefaults(authType: AuthType): ProviderDefaults {
+  if (authType === AuthType.USE_ANTHROPIC) {
+    return {
+      apiKeyEnvKey: 'ANTHROPIC_API_KEY',
+      modelEnvKey: 'ANTHROPIC_MODEL',
+      baseUrlEnvKey: 'ANTHROPIC_BASE_URL',
+      defaultBaseUrl: ANTHROPIC_DEFAULT_BASE_URL,
+    };
+  }
+
+  return {
+    apiKeyEnvKey: 'OPENAI_API_KEY',
+    modelEnvKey: 'OPENAI_MODEL',
+    baseUrlEnvKey: 'OPENAI_BASE_URL',
+    defaultBaseUrl: OPENAI_DEFAULT_BASE_URL,
+  };
+}
+
+function resolveProviderSubtype(authType: AuthType, baseUrl?: string): string {
+  const normalizedBaseUrl = (baseUrl || '').toLowerCase();
+
+  if (authType === AuthType.USE_OPENAI) {
+    if (normalizedBaseUrl.includes('openrouter.ai')) {
+      return 'openrouter';
+    }
+    if (normalizedBaseUrl.includes('api.deepseek.com')) {
+      return 'deepseek-openai';
+    }
+    return 'default-openai';
+  }
+
+  if (normalizedBaseUrl.includes('api.deepseek.com')) {
+    return 'deepseek-anthropic';
+  }
+
+  return 'default-anthropic';
+}
 
 export async function createContentGeneratorConfig(
   config: Config,
@@ -117,6 +261,67 @@ export async function createContentGeneratorConfig(
     process.env['GOOGLE_CLOUD_PROJECT_ID'] ||
     undefined;
   const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
+
+  if (authType && isProviderAuthType(authType)) {
+    const modelName = config.getModel();
+    const defaults = getProviderDefaults(authType);
+    const providerModelConfig = findProviderModelConfig(
+      config.getModelProvidersConfig?.(),
+      authType,
+      modelName,
+    );
+    const providerGenerationConfig = providerModelConfig?.generationConfig;
+    const apiKeyEnvKey = providerModelConfig?.envKey ?? defaults.apiKeyEnvKey;
+    const resolvedApiKey =
+      apiKey ||
+      config.getProviderApiKey() ||
+      (apiKeyEnvKey ? process.env[apiKeyEnvKey] : undefined) ||
+      process.env[defaults.apiKeyEnvKey];
+    const resolvedBaseUrl =
+      baseUrl ||
+      config.getProviderBaseUrl() ||
+      providerModelConfig?.baseUrl ||
+      process.env[defaults.baseUrlEnvKey] ||
+      defaults.defaultBaseUrl;
+    const resolvedModel = process.env[defaults.modelEnvKey] || modelName;
+
+    if (!resolvedModel) {
+      throw new Error(
+        `No model configured for ${authType}. Set --model, ${defaults.modelEnvKey}, settings.model.name, or modelProviders.${authType === AuthType.USE_OPENAI ? 'openai' : 'anthropic'}.`,
+      );
+    }
+
+    if (!resolvedApiKey) {
+      throw new Error(
+        `Missing API key for ${authType}. Set security.auth.apiKey, ${apiKeyEnvKey}, or ${defaults.apiKeyEnvKey}.`,
+      );
+    }
+
+    return {
+      authType,
+      proxy: config.getProxy(),
+      model: resolvedModel,
+      apiKey: resolvedApiKey,
+      apiKeyEnvKey,
+      baseUrl: resolvedBaseUrl,
+      timeout: providerGenerationConfig?.timeout,
+      maxRetries: providerGenerationConfig?.maxRetries,
+      retryErrorCodes: providerGenerationConfig?.retryErrorCodes,
+      enableCacheControl: providerGenerationConfig?.enableCacheControl,
+      samplingParams: providerGenerationConfig?.samplingParams,
+      reasoning: providerGenerationConfig?.reasoning,
+      schemaCompliance: providerGenerationConfig?.schemaCompliance,
+      contextWindowSize: providerGenerationConfig?.contextWindowSize,
+      customHeaders: {
+        ...providerGenerationConfig?.customHeaders,
+        ...customHeaders,
+      },
+      extra_body: providerGenerationConfig?.extra_body,
+      modalities: providerGenerationConfig?.modalities,
+      embeddingModel: providerGenerationConfig?.embeddingModel,
+      providerSubtype: resolveProviderSubtype(authType, resolvedBaseUrl),
+    };
+  }
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     authType,
@@ -270,6 +475,16 @@ export async function createContentGenerator(
       });
       return new LoggingContentGenerator(googleGenAI.models, gcConfig);
     }
+
+    if (isOpenAIAuthType(config.authType)) {
+      return createOpenAIContentGenerator(config, gcConfig);
+    }
+
+    if (isAnthropicAuthType(config.authType)) {
+      const provider = createAnthropicCompatibleProvider(config, gcConfig);
+      return new AnthropicContentGenerator(config, gcConfig, provider);
+    }
+
     throw new Error(
       `Error creating contentGenerator: Unsupported authType: ${config.authType}`,
     );

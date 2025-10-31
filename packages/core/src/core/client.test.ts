@@ -1563,7 +1563,54 @@ ${JSON.stringify(
           remainingTokenCount,
         },
       });
-      expect(tokenLimit).toHaveBeenCalledWith(STICKY_MODEL);
+      expect(tokenLimit).toHaveBeenCalledWith(STICKY_MODEL, expect.any(Object));
+      expect(mockTurnRunFn).not.toHaveBeenCalled();
+    });
+
+    it('should reserve completion tokens for non-Google provider overflow checks', async () => {
+      vi.mocked(mockConfig.getContentGeneratorConfig).mockReturnValue({
+        apiKey: 'test-key',
+        authType: AuthType.USE_OPENAI,
+        samplingParams: {
+          max_tokens: 65_536,
+        },
+      } as ContentGeneratorConfig);
+      vi.mocked(tokenLimit).mockImplementation((_, __, type) =>
+        type === 'output' ? 65_536 : 131_072,
+      );
+
+      const lastPromptTokenCount = 70_560;
+      const mockChat: Partial<GeminiChat> = {
+        getLastPromptTokenCount: vi.fn().mockReturnValue(lastPromptTokenCount),
+        setTools: vi.fn(),
+        getHistory: vi.fn().mockReturnValue([]),
+      };
+      client['chat'] = mockChat as GeminiChat;
+
+      const request: Part[] = [{ text: 'tiny' }];
+      const estimatedRequestTokenCount = 1;
+
+      vi.spyOn(client, 'tryCompressChat').mockResolvedValue({
+        originalTokenCount: lastPromptTokenCount,
+        newTokenCount: lastPromptTokenCount,
+        compressionStatus: CompressionStatus.NOOP,
+      });
+
+      const stream = client.sendMessageStream(
+        request,
+        new AbortController().signal,
+        'prompt-id-provider-overflow',
+      );
+
+      const events = await fromAsync(stream);
+
+      expect(events).toContainEqual({
+        type: GeminiEventType.ContextWindowWillOverflow,
+        value: {
+          estimatedRequestTokenCount,
+          remainingTokenCount: 0,
+        },
+      });
       expect(mockTurnRunFn).not.toHaveBeenCalled();
     });
 

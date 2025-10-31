@@ -9,28 +9,32 @@ import type { LoadedSettings } from '../../config/settings.js';
 import {
   AuthType,
   type Config,
+  isProviderAuthType,
   loadApiKey,
+  isOpenAIAuthType,
   debugLogger,
   isAccountSuspendedError,
   ProjectIdRequiredError,
 } from '@google/gemini-cli-core';
 import { getErrorMessage } from '@google/gemini-cli-core';
 import { AuthState } from '../types.js';
-import { validateAuthMethod } from '../../config/auth.js';
+import { parseAuthType, validateAuthMethod } from '../../config/auth.js';
 
 export function validateAuthMethodWithSettings(
   authType: AuthType,
   settings: LoadedSettings,
 ): string | null {
-  const enforcedType = settings.merged.security.auth.enforcedType;
+  const enforcedType = parseAuthType(
+    settings.merged.security.auth.enforcedType,
+  );
   if (enforcedType && enforcedType !== authType) {
     return `Authentication is enforced to be ${enforcedType}, but you are currently using ${authType}.`;
   }
   if (settings.merged.security.auth.useExternal) {
     return null;
   }
-  // If using Gemini API key, we don't validate it here as we might need to prompt for it.
-  if (authType === AuthType.USE_GEMINI) {
+  // API-key based providers may still need an inline prompt.
+  if (authType === AuthType.USE_GEMINI || isProviderAuthType(authType)) {
     return null;
   }
   return validateAuthMethod(authType);
@@ -66,16 +70,43 @@ export const useAuthCommand = (
   );
 
   const reloadApiKey = useCallback(async () => {
-    const envKey = process.env['GEMINI_API_KEY'];
-    if (envKey !== undefined) {
-      setApiKeyDefaultValue(envKey);
-      return envKey;
+    const authType = parseAuthType(settings.merged.security.auth.selectedType);
+
+    if (authType === AuthType.USE_GEMINI) {
+      const envKey = process.env['GEMINI_API_KEY'];
+      if (envKey !== undefined) {
+        setApiKeyDefaultValue(envKey);
+        return envKey;
+      }
+
+      const storedKey = (await loadApiKey()) ?? '';
+      setApiKeyDefaultValue(storedKey);
+      return storedKey;
     }
 
-    const storedKey = (await loadApiKey()) ?? '';
-    setApiKeyDefaultValue(storedKey);
-    return storedKey;
-  }, []);
+    if (authType && isProviderAuthType(authType)) {
+      const providerKey = isOpenAIAuthType(authType) ? 'openai' : 'anthropic';
+      const defaultEnvKey = isOpenAIAuthType(authType)
+        ? 'OPENAI_API_KEY'
+        : 'ANTHROPIC_API_KEY';
+      const selectedModel = settings.merged.model?.name;
+      const providerModel = settings.merged.modelProviders?.[providerKey]?.find(
+        (entry) => entry.id === selectedModel,
+      );
+      const resolvedKey =
+        settings.merged.security.auth.apiKey ||
+        (providerModel?.envKey
+          ? process.env[providerModel.envKey]
+          : undefined) ||
+        process.env[defaultEnvKey] ||
+        '';
+      setApiKeyDefaultValue(resolvedKey);
+      return resolvedKey;
+    }
+
+    setApiKeyDefaultValue(undefined);
+    return '';
+  }, [settings]);
 
   useEffect(() => {
     if (authState === AuthState.AwaitingApiKeyInput) {
@@ -91,11 +122,21 @@ export const useAuthCommand = (
         return;
       }
 
-      const authType = settings.merged.security.auth.selectedType;
+      const authType = parseAuthType(
+        settings.merged.security.auth.selectedType,
+      );
       if (!authType) {
         if (process.env['GEMINI_API_KEY']) {
           onAuthError(
             'Existing API key detected (GEMINI_API_KEY). Select "Gemini API Key" option to use it.',
+          );
+        } else if (process.env['OPENAI_API_KEY']) {
+          onAuthError(
+            'Existing API key detected (OPENAI_API_KEY). Select "OpenAI API Key" option to use it.',
+          );
+        } else if (process.env['ANTHROPIC_API_KEY']) {
+          onAuthError(
+            'Existing API key detected (ANTHROPIC_API_KEY). Select "Anthropic API Key" option to use it.',
           );
         } else {
           onAuthError('No authentication method selected.');
@@ -103,8 +144,8 @@ export const useAuthCommand = (
         return;
       }
 
-      if (authType === AuthType.USE_GEMINI) {
-        const key = await reloadApiKey(); // Use the unified function
+      if (authType === AuthType.USE_GEMINI || isProviderAuthType(authType)) {
+        const key = await reloadApiKey();
         if (!key) {
           setAuthState(AuthState.AwaitingApiKeyInput);
           return;
@@ -118,11 +159,7 @@ export const useAuthCommand = (
       }
 
       const defaultAuthType = process.env['GEMINI_DEFAULT_AUTH_TYPE'];
-      if (
-        defaultAuthType &&
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-        !Object.values(AuthType).includes(defaultAuthType as AuthType)
-      ) {
+      if (defaultAuthType && !parseAuthType(defaultAuthType)) {
         onAuthError(
           `Invalid value for GEMINI_DEFAULT_AUTH_TYPE: "${defaultAuthType}". ` +
             `Valid values are: ${Object.values(AuthType).join(', ')}.`,

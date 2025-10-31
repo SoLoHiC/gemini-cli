@@ -12,10 +12,10 @@ import { tokenLimit } from '../core/tokenLimits.js';
 import { getCompressionPrompt } from '../core/prompts.js';
 import { getResponseText } from '../utils/partUtils.js';
 import { logChatCompression } from '../telemetry/loggers.js';
-import { makeChatCompressionEvent, LlmRole } from '../telemetry/types.js';
+import { LlmRole, makeChatCompressionEvent } from '../telemetry/types.js';
 import {
-  saveTruncatedToolOutput,
   formatTruncatedToolOutput,
+  saveTruncatedToolOutput,
 } from '../utils/fileUtils.js';
 import { debugLogger } from '../utils/debugLogger.js';
 import { getInitialChatHistory } from '../utils/environmentContext.js';
@@ -27,11 +27,13 @@ import {
   DEFAULT_GEMINI_FLASH_LITE_MODEL,
   DEFAULT_GEMINI_FLASH_MODEL,
   DEFAULT_GEMINI_MODEL,
-  PREVIEW_GEMINI_MODEL,
-  PREVIEW_GEMINI_FLASH_MODEL,
   PREVIEW_GEMINI_3_1_MODEL,
+  PREVIEW_GEMINI_FLASH_MODEL,
+  PREVIEW_GEMINI_MODEL,
 } from '../config/models.js';
 import { PreCompressTrigger } from '../hooks/types.js';
+import { isGoogleAuthType } from '../core/contentGenerator.js';
+import type { ModelConfigKey } from './modelConfigService.js';
 
 /**
  * Default threshold for compression token count as a fraction of the model's
@@ -116,6 +118,36 @@ export function modelStringToModelConfigAlias(model: string): string {
   }
 }
 
+function getCompressionModelConfigKey(
+  config: Config,
+  model: string,
+): ModelConfigKey {
+  const authType = config.getContentGeneratorConfig()?.authType;
+  if (isGoogleAuthType(authType)) {
+    return { model: modelStringToModelConfigAlias(model) };
+  }
+
+  return { model: config.getActiveModel() || model };
+}
+
+function getEffectiveContextLimit(config: Config, model: string): number {
+  const inputLimit = tokenLimit(model, config);
+  const authType = config.getContentGeneratorConfig?.()?.authType;
+
+  if (!authType || isGoogleAuthType(authType)) {
+    return inputLimit;
+  }
+
+  const configuredMaxTokens =
+    config.getContentGeneratorConfig?.()?.samplingParams?.max_tokens;
+  const reservedCompletionTokens =
+    typeof configuredMaxTokens === 'number' && configuredMaxTokens > 0
+      ? Math.min(configuredMaxTokens, tokenLimit(model, config, 'output'))
+      : tokenLimit(model, config, 'output');
+
+  return Math.max(1, inputLimit - reservedCompletionTokens);
+}
+
 /**
  * Processes the chat history to ensure function responses don't exceed a specific token budget.
  *
@@ -156,13 +188,13 @@ async function truncateHistoryToBudget(
           } else if (responseObj && typeof responseObj === 'object') {
             if (
               'output' in responseObj &&
-              // eslint-disable-next-line no-restricted-syntax
+               
               typeof responseObj['output'] === 'string'
             ) {
               contentStr = responseObj['output'];
             } else if (
               'content' in responseObj &&
-              // eslint-disable-next-line no-restricted-syntax
+               
               typeof responseObj['content'] === 'string'
             ) {
               contentStr = responseObj['content'];
@@ -266,7 +298,10 @@ export class ChatCompressionService {
       const threshold =
         (await config.getCompressionThreshold()) ??
         DEFAULT_COMPRESSION_TOKEN_THRESHOLD;
-      if (originalTokenCount < threshold * tokenLimit(model)) {
+      if (
+        originalTokenCount <
+        threshold * getEffectiveContextLimit(config, model)
+      ) {
         return {
           newHistory: null,
           info: {
@@ -340,7 +375,7 @@ export class ChatCompressionService {
     );
 
     const historyForSummarizer =
-      originalToCompressTokenCount < tokenLimit(model)
+      originalToCompressTokenCount < getEffectiveContextLimit(config, model)
         ? originalHistoryToCompress
         : historyToCompressTruncated;
 
@@ -352,8 +387,13 @@ export class ChatCompressionService {
       ? 'A previous <state_snapshot> exists in the history. You MUST integrate all still-relevant information from that snapshot into the new one, updating it with the more recent events. Do not lose established constraints or critical knowledge.'
       : 'Generate a new <state_snapshot> based on the provided history.';
 
+    const compressionModelConfigKey = getCompressionModelConfigKey(
+      config,
+      model,
+    );
+
     const summaryResponse = await config.getBaseLlmClient().generateContent({
-      modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+      modelConfigKey: compressionModelConfigKey,
       contents: [
         ...historyForSummarizer,
         {
@@ -378,7 +418,7 @@ export class ChatCompressionService {
     const verificationResponse = await config
       .getBaseLlmClient()
       .generateContent({
-        modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+        modelConfigKey: compressionModelConfigKey,
         contents: [
           ...historyForSummarizer,
           {

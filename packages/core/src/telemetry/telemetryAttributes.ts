@@ -15,13 +15,16 @@ const installationManager = new InstallationManager();
 export function getCommonAttributes(config: Config): Attributes {
   const email = userAccountManager.getCachedGoogleAccount();
   const experiments = config.getExperiments();
-  const authType = config.getContentGeneratorConfig()?.authType;
+  const generatorConfig = config.getContentGeneratorConfig();
+  const authType = generatorConfig?.authType;
+  const providerSubtype = generatorConfig?.providerSubtype;
   return {
     'session.id': config.getSessionId(),
     'installation.id': installationManager.getInstallationId(),
     interactive: config.isInteractive(),
     ...(email && { 'user.email': email }),
     ...(authType && { auth_type: authType }),
+    ...(providerSubtype && { provider_subtype: providerSubtype }),
     ...(experiments &&
       experiments.experimentIds.length > 0 && {
         'experiments.ids': experiments.experimentIds,

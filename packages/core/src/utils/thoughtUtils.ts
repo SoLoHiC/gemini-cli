@@ -7,6 +7,7 @@
 export type ThoughtSummary = {
   subject: string;
   description: string;
+  rawText?: string;
 };
 
 const START_DELIMITER = '**';
@@ -27,7 +28,7 @@ export function parseThought(rawText: string): ThoughtSummary {
   const startIndex = rawText.indexOf(START_DELIMITER);
   if (startIndex === -1) {
     // No start delimiter found, the whole text is the description.
-    return { subject: '', description: rawText.trim() };
+    return { subject: '', description: rawText.trim(), rawText };
   }
 
   const endIndex = rawText.indexOf(
@@ -37,7 +38,7 @@ export function parseThought(rawText: string): ThoughtSummary {
   if (endIndex === -1) {
     // Start delimiter found but no end delimiter, so it's not a valid subject.
     // Treat the entire string as the description.
-    return { subject: '', description: rawText.trim() };
+    return { subject: '', description: rawText.trim(), rawText };
   }
 
   const subject = rawText
@@ -50,5 +51,5 @@ export function parseThought(rawText: string): ThoughtSummary {
     rawText.substring(endIndex + END_DELIMITER.length)
   ).trim();
 
-  return { subject, description };
+  return { subject, description, rawText };
 }

@@ -601,6 +601,8 @@ export enum GenAiOperationName {
 export enum GenAiProviderName {
   GCP_GEN_AI = 'gcp.gen_ai',
   GCP_VERTEX_AI = 'gcp.vertex_ai',
+  OPENAI = 'openai',
+  ANTHROPIC = 'anthropic',
 }
 
 export enum GenAiTokenType {
@@ -1066,6 +1068,11 @@ function getGenAiProvider(authType?: string): GenAiProviderName {
     case AuthType.LOGIN_WITH_GOOGLE:
       return GenAiProviderName.GCP_VERTEX_AI;
     case AuthType.USE_GEMINI:
+      return GenAiProviderName.GCP_GEN_AI;
+    case AuthType.USE_OPENAI:
+      return GenAiProviderName.OPENAI;
+    case AuthType.USE_ANTHROPIC:
+      return GenAiProviderName.ANTHROPIC;
     default:
       return GenAiProviderName.GCP_GEN_AI;
   }

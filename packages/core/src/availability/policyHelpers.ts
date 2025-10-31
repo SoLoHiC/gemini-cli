@@ -6,6 +6,7 @@
 
 import type { GenerateContentConfig } from '@google/genai';
 import type { Config } from '../config/config.js';
+import { isProviderAuthType } from '../core/contentGenerator.js';
 import type {
   FailureKind,
   FallbackAction,
@@ -16,15 +17,15 @@ import type {
 import {
   createDefaultPolicy,
   createSingleModelChain,
-  getModelPolicyChain,
   getFlashLitePolicyChain,
+  getModelPolicyChain,
 } from './policyCatalog.js';
 import {
   DEFAULT_GEMINI_FLASH_LITE_MODEL,
   DEFAULT_GEMINI_MODEL,
-  PREVIEW_GEMINI_MODEL_AUTO,
   isAutoModel,
   isGemini3Model,
+  PREVIEW_GEMINI_MODEL_AUTO,
   resolveModel,
 } from '../config/models.js';
 import type { ModelSelectionResult } from './modelAvailabilityService.js';
@@ -42,6 +43,11 @@ export function resolvePolicyChain(
   const modelFromConfig =
     preferredModel ?? config.getActiveModel?.() ?? config.getModel();
   const configuredModel = config.getModel();
+  const authType = config.getContentGeneratorConfig?.()?.authType;
+
+  if (isProviderAuthType(authType)) {
+    return createSingleModelChain(modelFromConfig);
+  }
 
   let chain;
   const useGemini31 = config.getGemini31LaunchedSync?.() ?? false;

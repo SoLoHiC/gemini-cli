@@ -34,6 +34,9 @@ const mockConfig = {
   getProxy: vi.fn().mockReturnValue(undefined),
   getUsageStatisticsEnabled: vi.fn().mockReturnValue(true),
   getClientName: vi.fn().mockReturnValue(undefined),
+  getProviderApiKey: vi.fn().mockReturnValue(undefined),
+  getProviderBaseUrl: vi.fn().mockReturnValue(undefined),
+  getModelProvidersConfig: vi.fn().mockReturnValue(undefined),
 } as unknown as Config;
 
 describe('createContentGenerator', () => {
@@ -647,14 +650,21 @@ describe('createContentGeneratorConfig', () => {
     getModel: vi.fn().mockReturnValue('gemini-pro'),
     setModel: vi.fn(),
     flashFallbackHandler: vi.fn(),
-    getProxy: vi.fn(),
+    getProxy: vi.fn().mockReturnValue(undefined),
     getClientName: vi.fn().mockReturnValue(undefined),
+    getProviderApiKey: vi.fn().mockReturnValue(undefined),
+    getProviderBaseUrl: vi.fn().mockReturnValue(undefined),
+    getModelProvidersConfig: vi.fn().mockReturnValue(undefined),
   } as unknown as Config;
 
   beforeEach(() => {
     // Reset modules to re-evaluate imports and environment variables
     vi.resetModules();
     vi.clearAllMocks();
+    vi.mocked(mockConfig.getModel).mockReturnValue('gemini-pro');
+    vi.mocked(mockConfig.getProviderApiKey).mockReturnValue(undefined);
+    vi.mocked(mockConfig.getProviderBaseUrl).mockReturnValue(undefined);
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -744,6 +754,73 @@ describe('createContentGeneratorConfig', () => {
     );
     expect(config.apiKey).toBe('gateway-placeholder-key');
     expect(config.vertexai).toBe(false);
+  });
+
+  it('should configure provider auth from modelProviders envKey and baseUrl', async () => {
+    vi.mocked(mockConfig.getModel).mockReturnValue('deepseek-chat');
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue({
+      openai: [
+        {
+          id: 'deepseek-chat',
+          envKey: 'DEEPSEEK_API_KEY',
+          baseUrl: 'https://api.deepseek.com',
+          generationConfig: {
+            timeout: 120000,
+            maxRetries: 4,
+            samplingParams: {
+              max_tokens: 4096,
+              temperature: 0,
+            },
+            contextWindowSize: 131072,
+          },
+        },
+      ],
+    });
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-test-key');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('deepseek-test-key');
+    expect(config.apiKeyEnvKey).toBe('DEEPSEEK_API_KEY');
+    expect(config.baseUrl).toBe('https://api.deepseek.com');
+    expect(config.timeout).toBe(120000);
+    expect(config.maxRetries).toBe(4);
+    expect(config.samplingParams).toEqual({
+      max_tokens: 4096,
+      temperature: 0,
+    });
+    expect(config.contextWindowSize).toBe(131072);
+    expect(config.providerSubtype).toBe('deepseek-openai');
+  });
+
+  it('should prefer explicit providerApiKey and providerBaseUrl over modelProviders', async () => {
+    vi.mocked(mockConfig.getModel).mockReturnValue('deepseek-chat');
+    vi.mocked(mockConfig.getProviderApiKey).mockReturnValue('settings-key');
+    vi.mocked(mockConfig.getProviderBaseUrl).mockReturnValue(
+      'https://proxy.example.com/v1',
+    );
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue({
+      openai: [
+        {
+          id: 'deepseek-chat',
+          envKey: 'DEEPSEEK_API_KEY',
+          baseUrl: 'https://api.deepseek.com',
+        },
+      ],
+    });
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-test-key');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('settings-key');
+    expect(config.baseUrl).toBe('https://proxy.example.com/v1');
+    expect(config.providerSubtype).toBe('default-openai');
   });
 });
 

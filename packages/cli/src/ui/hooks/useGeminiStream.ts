@@ -22,7 +22,6 @@ import {
   ToolConfirmationOutcome,
   MessageBusType,
   promptIdContext,
-  tokenLimit,
   debugLogger,
   runInDevTraceSpan,
   EDIT_TOOL_NAMES,
@@ -31,6 +30,7 @@ import {
   recordToolCallInteractions,
   ToolErrorType,
   ValidationRequiredError,
+  parseThought,
   coreEvents,
   CoreEvent,
   CoreToolCallStatus,
@@ -38,6 +38,7 @@ import {
   GeminiCliOperation,
   getPlanModeExitMessage,
   isBackgroundExecutionData,
+  isGoogleAuthType,
   Kind,
 } from '@google/gemini-cli-core';
 import type {
@@ -85,6 +86,7 @@ import {
   type TrackedExecutingToolCall,
 } from './useToolScheduler.js';
 import { theme } from '../semantic-colors.js';
+import { getEffectiveContextLimit } from '../utils/contextUsage.js';
 import { getToolGroupBorderAppearance } from '../utils/borderStyles.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -106,6 +108,33 @@ enum StreamProcessingStatus {
   Completed,
   UserCancelled,
   Error,
+}
+
+function getThoughtRawText(thought: ThoughtSummary): string {
+  if (typeof thought.rawText === 'string') {
+    return thought.rawText;
+  }
+
+  if (thought.subject && thought.description) {
+    return `**${thought.subject}** ${thought.description}`;
+  }
+
+  if (thought.subject) {
+    return `**${thought.subject}**`;
+  }
+
+  return thought.description;
+}
+
+function shouldStreamThinkingIntoPendingHistory(
+  settings: LoadedSettings,
+  config: Config,
+): boolean {
+  if (getInlineThinkingMode(settings) !== 'full') {
+    return false;
+  }
+
+  return !isGoogleAuthType(config.getContentGeneratorConfig()?.authType);
 }
 
 const SUPPRESSED_TOOL_ERRORS_NOTE =
@@ -246,6 +275,7 @@ export const useGeminiStream = (
   );
   const [thought, thoughtRef, setThought] =
     useStateAndRef<ThoughtSummary | null>(null);
+  const pendingThoughtRawTextRef = useRef('');
   const [pendingHistoryItem, pendingHistoryItemRef, setPendingHistoryItem] =
     useStateAndRef<HistoryItemWithoutId | null>(null);
 
@@ -981,18 +1011,68 @@ export const useGeminiStream = (
   );
 
   const handleThoughtEvent = useCallback(
-    (eventValue: ThoughtSummary, _userMessageTimestamp: number) => {
-      setThought(eventValue);
+    (eventValue: ThoughtSummary) => {
+      pendingThoughtRawTextRef.current += getThoughtRawText(eventValue);
+      const parsedThought = parseThought(pendingThoughtRawTextRef.current);
+      setThought(parsedThought);
 
-      if (getInlineThinkingMode(settings) === 'full') {
-        addItem({
-          type: 'thinking',
-          thought: eventValue,
-        } as HistoryItemThinking);
+      if (shouldStreamThinkingIntoPendingHistory(settings, config)) {
+        setPendingHistoryItem((item) => {
+          if (item && item.type !== 'thinking') {
+            return item;
+          }
+
+          return {
+            type: 'thinking',
+            thought: parsedThought,
+          } as HistoryItemThinking;
+        });
       }
     },
-    [addItem, settings, setThought],
+    [config, setPendingHistoryItem, setThought, settings],
   );
+
+  const flushPendingThought = useCallback(() => {
+    if (!pendingThoughtRawTextRef.current) {
+      return;
+    }
+
+    if (getInlineThinkingMode(settings) === 'full') {
+      if (
+        shouldStreamThinkingIntoPendingHistory(settings, config) &&
+        pendingHistoryItemRef.current?.type === 'thinking'
+      ) {
+        addItem(pendingHistoryItemRef.current);
+        setPendingHistoryItem(null);
+      } else {
+        addItem({
+          type: 'thinking',
+          thought: parseThought(pendingThoughtRawTextRef.current),
+        } as HistoryItemThinking);
+      }
+    }
+
+    pendingThoughtRawTextRef.current = '';
+  }, [addItem, config, pendingHistoryItemRef, setPendingHistoryItem, settings]);
+
+  const clearPendingThought = useCallback(() => {
+    pendingThoughtRawTextRef.current = '';
+    if (pendingHistoryItemRef.current?.type === 'thinking') {
+      setPendingHistoryItem(null);
+    }
+    setThought(null);
+  }, [pendingHistoryItemRef, setPendingHistoryItem, setThought]);
+
+  const flushAndClearPendingThought = useCallback(() => {
+    flushPendingThought();
+    clearPendingThought();
+  }, [clearPendingThought, flushPendingThought]);
+
+  const clearTransientThought = useCallback(() => {
+    if (thoughtRef.current !== null) {
+      flushAndClearPendingThought();
+    }
+  }, [flushAndClearPendingThought, thoughtRef]);
 
   const handleUserCancelledEvent = useCallback(
     (userMessageTimestamp: number) => {
@@ -1026,13 +1106,13 @@ export const useGeminiStream = (
         userMessageTimestamp,
       );
       setIsResponding(false);
-      setThought(null); // Reset thought when user cancels
+      clearPendingThought();
     },
     [
       addItem,
+      clearPendingThought,
       pendingHistoryItemRef,
       setPendingHistoryItem,
-      setThought,
       setIsResponding,
     ],
   );
@@ -1058,14 +1138,14 @@ export const useGeminiStream = (
         userMessageTimestamp,
       );
       maybeAddLowVerbosityFailureNote(userMessageTimestamp);
-      setThought(null); // Reset thought when there's an error
+      clearPendingThought();
     },
     [
       addItem,
+      clearPendingThought,
       pendingHistoryItemRef,
       setPendingHistoryItem,
       config,
-      setThought,
       maybeAddSuppressedToolErrorNote,
       maybeAddLowVerbosityFailureNote,
     ],
@@ -1145,7 +1225,7 @@ export const useGeminiStream = (
         setPendingHistoryItem(null);
       }
 
-      const limit = tokenLimit(config.getModel());
+      const limit = getEffectiveContextLimit(config.getModel(), config);
       const originalPercentage = Math.round(
         ((eventValue?.originalTokenCount ?? 0) / limit) * 100,
       );
@@ -1182,7 +1262,7 @@ export const useGeminiStream = (
     (estimatedRequestTokenCount: number, remainingTokenCount: number) => {
       onCancelSubmit(true);
 
-      const limit = tokenLimit(config.getModel());
+      const limit = getEffectiveContextLimit(config.getModel(), config);
 
       const isMoreThan25PercentUsed =
         limit > 0 && remainingTokenCount < limit * 0.75;
@@ -1307,17 +1387,14 @@ export const useGeminiStream = (
       let geminiMessageBuffer = '';
       const toolCallRequests: ToolCallRequestInfo[] = [];
       for await (const event of stream) {
-        if (
-          event.type !== ServerGeminiEventType.Thought &&
-          thoughtRef.current !== null
-        ) {
-          setThought(null);
+        if (event.type !== ServerGeminiEventType.Thought) {
+          clearTransientThought();
         }
 
         switch (event.type) {
           case ServerGeminiEventType.Thought:
             setLastGeminiActivityTime(Date.now());
-            handleThoughtEvent(event.value, userMessageTimestamp);
+            handleThoughtEvent(event.value);
             break;
           case ServerGeminiEventType.Content:
             setLastGeminiActivityTime(Date.now());
@@ -1393,6 +1470,7 @@ export const useGeminiStream = (
           }
         }
       }
+      clearTransientThought();
       if (toolCallRequests.length > 0) {
         if (pendingHistoryItemRef.current) {
           addItem(pendingHistoryItemRef.current, userMessageTimestamp);
@@ -1403,9 +1481,9 @@ export const useGeminiStream = (
       return StreamProcessingStatus.Completed;
     },
     [
+      clearTransientThought,
       handleContentEvent,
       handleThoughtEvent,
-      thoughtRef,
       handleUserCancelledEvent,
       handleErrorEvent,
       scheduleToolCalls,
@@ -1420,7 +1498,6 @@ export const useGeminiStream = (
       addItem,
       pendingHistoryItemRef,
       setPendingHistoryItem,
-      setThought,
     ],
   );
   const submitQuery = useCallback(
@@ -1496,7 +1573,7 @@ export const useGeminiStream = (
                 );
               }
               startNewPrompt();
-              setThought(null); // Reset thought when starting a new prompt
+              clearPendingThought();
             }
 
             setIsResponding(true);
@@ -1613,7 +1690,7 @@ export const useGeminiStream = (
       config,
       startNewPrompt,
       getPromptCount,
-      setThought,
+      clearPendingThought,
       maybeAddSuppressedToolErrorNote,
       maybeAddLowVerbosityFailureNote,
       settings.merged.billing?.overageStrategy,
