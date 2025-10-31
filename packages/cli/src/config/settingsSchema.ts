@@ -18,6 +18,7 @@ import {
   type AuthType,
   type AgentOverride,
   type CustomTheme,
+  type CompatibleModelConfig,
 } from '@google/gemini-cli-core';
 import type { SessionRetentionSettings } from './settings.js';
 import { DEFAULT_MIN_RETENTION } from '../utils/sessionCleanup.js';
@@ -1018,6 +1019,17 @@ const SETTINGS_SCHEMA = {
         showInDialog: false,
       },
     },
+  },
+
+  compatibleModels: {
+    type: 'array',
+    label: 'Compatible Models',
+    category: 'Model',
+    requiresRestart: true,
+    default: [] as CompatibleModelConfig[],
+    description:
+      'Configuration for compatible models (OpenAI, Anthropic, etc.).',
+    showInDialog: false,
   },
 
   agents: {

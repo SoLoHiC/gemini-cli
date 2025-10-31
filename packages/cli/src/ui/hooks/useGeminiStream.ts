@@ -1105,7 +1105,7 @@ export const useGeminiStream = (
     (estimatedRequestTokenCount: number, remainingTokenCount: number) => {
       onCancelSubmit(true);
 
-      const limit = tokenLimit(config.getModel());
+      const limit = tokenLimit(config.getModel(), config);
 
       const isMoreThan25PercentUsed =
         limit > 0 && remainingTokenCount < limit * 0.75;

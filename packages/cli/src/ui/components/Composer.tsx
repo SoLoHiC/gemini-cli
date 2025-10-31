@@ -149,6 +149,7 @@ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
       typeof uiState.currentModel === 'string'
         ? uiState.currentModel
         : undefined,
+      config,
     );
   const hideShortcutsHintForSuggestions = hideUiDetailsForSuggestions;
   const isModelIdle = uiState.streamingState === StreamingState.Idle;

@@ -25,6 +25,10 @@ import { parseCustomHeaders } from '../utils/customHeaderUtils.js';
 import { RecordingContentGenerator } from './recordingContentGenerator.js';
 import { getVersion, resolveModel } from '../../index.js';
 import type { LlmRole } from '../telemetry/llmRole.js';
+import { OpenAIContentGenerator } from '../openai-generator/index.js';
+import { DefaultOpenAICompatibleProvider } from '../openai-generator/provider/default.js';
+import { AnthropicContentGenerator } from '../anthropic-generator/anthropicContentGenerator.js';
+import { createAnthropicCompatibleProvider } from '../anthropic-generator/index.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -59,6 +63,8 @@ export enum AuthType {
   USE_VERTEX_AI = 'vertex-ai',
   LEGACY_CLOUD_SHELL = 'cloud-shell',
   COMPUTE_ADC = 'compute-default-credentials',
+  OPENAI_COMPATIBLE = 'openai-compatible',
+  ANTHROPIC_COMPATIBLE = 'anthropic-compatible',
 }
 
 /**
@@ -93,6 +99,21 @@ export type ContentGeneratorConfig = {
   vertexai?: boolean;
   authType?: AuthType;
   proxy?: string;
+  model?: string;
+  baseUrl?: string;
+  timeout?: number;
+  maxRetries?: number;
+  enableOpenAILogging?: boolean;
+  disableCacheControl?: boolean;
+  samplingParams?: {
+    top_p?: number;
+    top_k?: number;
+    repetition_penalty?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    temperature?: number;
+    max_tokens?: number;
+  };
 };
 
 export async function createContentGeneratorConfig(
@@ -111,6 +132,25 @@ export async function createContentGeneratorConfig(
     process.env['GOOGLE_CLOUD_PROJECT_ID'] ||
     undefined;
   const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
+
+  // Handle compatible models first
+  if (
+    authType === AuthType.OPENAI_COMPATIBLE ||
+    authType === AuthType.ANTHROPIC_COMPATIBLE
+  ) {
+    const modelName = config.getModel();
+    const compatibleModelConfig = config
+      .getCompatibleModels()
+      .find((m) => m.model === modelName);
+
+    if (compatibleModelConfig) {
+      return {
+        ...compatibleModelConfig,
+        authType,
+        proxy: config?.getProxy(),
+      };
+    }
+  }
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     authType,
@@ -224,6 +264,17 @@ export async function createContentGenerator(
       });
       return new LoggingContentGenerator(googleGenAI.models, gcConfig);
     }
+
+    if (config.authType === AuthType.OPENAI_COMPATIBLE) {
+      const provider = new DefaultOpenAICompatibleProvider(config, gcConfig);
+      return new OpenAIContentGenerator(config, gcConfig, provider);
+    }
+
+    if (config.authType === AuthType.ANTHROPIC_COMPATIBLE) {
+      const provider = createAnthropicCompatibleProvider(config, gcConfig);
+      return new AnthropicContentGenerator(config, gcConfig, provider);
+    }
+
     throw new Error(
       `Error creating contentGenerator: Unsupported authType: ${config.authType}`,
     );

@@ -469,6 +469,10 @@ export interface PolicyUpdateConfirmationRequest {
   newHash: string;
 }
 
+export interface CompatibleModelConfig extends ContentGeneratorConfig {
+  tokenLimit?: number;
+}
+
 export interface ConfigParameters {
   sessionId: string;
   clientVersion?: string;
@@ -514,6 +518,7 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   disableLoopDetection?: boolean;
+  compatibleModels?: CompatibleModelConfig[];
   maxSessionTurns?: number;
   experimentalZedIntegration?: boolean;
   listSessions?: boolean;
@@ -670,6 +675,7 @@ export class Config implements McpContext {
   private readonly disableLoopDetection: boolean;
   // null = unknown (quota not fetched); true = has access; false = definitively no access
   private hasAccessToPreviewModel: boolean | null = null;
+  private readonly compatibleModels: CompatibleModelConfig[];
   private readonly noBrowser: boolean;
   private readonly folderTrust: boolean;
   private ideMode: boolean;
@@ -909,6 +915,7 @@ export class Config implements McpContext {
         params.toolOutputMasking?.protectLatestTurn ??
         DEFAULT_PROTECT_LATEST_TURN,
     };
+    this.compatibleModels = params.compatibleModels ?? [];
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
     this.experimentalZedIntegration =
       params.experimentalZedIntegration ?? false;
@@ -1091,6 +1098,10 @@ export class Config implements McpContext {
 
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  getCompatibleModels(): CompatibleModelConfig[] {
+    return this.compatibleModels;
   }
 
   /**
@@ -2662,7 +2673,7 @@ export class Config implements McpContext {
     return Math.min(
       // Estimate remaining context window in characters (1 token ~= 4 chars).
       4 *
-        (tokenLimit(this.model) - uiTelemetryService.getLastPromptTokenCount()),
+        (tokenLimit(this.model, this) - uiTelemetryService.getLastPromptTokenCount()),
       this.truncateToolOutputThreshold,
     );
   }
