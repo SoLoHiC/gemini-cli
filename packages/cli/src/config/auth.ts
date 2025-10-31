@@ -42,5 +42,13 @@ export function validateAuthMethod(authMethod: string): string | null {
     return null;
   }
 
+  // Handle compatible models
+  if (
+    authMethod === AuthType.OPENAI_COMPATIBLE ||
+    authMethod === AuthType.ANTHROPIC_COMPATIBLE
+  ) {
+    return null;
+  }
+
   return 'Invalid auth method selected.';
 }

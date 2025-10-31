@@ -11,13 +11,14 @@ import {
   PREVIEW_GEMINI_FLASH_MODEL,
   PREVIEW_GEMINI_MODEL,
 } from '../config/models.js';
+import type { Config } from '../config/config.js';
 
 type Model = string;
 type TokenCount = number;
 
 export const DEFAULT_TOKEN_LIMIT = 1_048_576;
 
-export function tokenLimit(model: Model): TokenCount {
+export function tokenLimit(model: Model, config?: Config): TokenCount {
   // Add other models as they become relevant or if specified by config
   // Pulled from https://ai.google.dev/gemini-api/docs/models
   switch (model) {
@@ -27,7 +28,15 @@ export function tokenLimit(model: Model): TokenCount {
     case DEFAULT_GEMINI_FLASH_MODEL:
     case DEFAULT_GEMINI_FLASH_LITE_MODEL:
       return 1_048_576;
-    default:
+    default: {
+      const compatibleModel = config
+        ?.getCompatibleModels()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ?.find((m: any) => m.model === model);
+      if (compatibleModel && compatibleModel.tokenLimit) {
+        return compatibleModel.tokenLimit;
+      }
       return DEFAULT_TOKEN_LIMIT;
+    }
   }
 }

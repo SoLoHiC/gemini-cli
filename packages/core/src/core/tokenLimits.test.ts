@@ -16,23 +16,25 @@ import {
 
 describe('tokenLimit', () => {
   it('should return the correct token limit for default models', () => {
-    expect(tokenLimit(DEFAULT_GEMINI_MODEL)).toBe(1_048_576);
-    expect(tokenLimit(DEFAULT_GEMINI_FLASH_MODEL)).toBe(1_048_576);
-    expect(tokenLimit(DEFAULT_GEMINI_FLASH_LITE_MODEL)).toBe(1_048_576);
+    expect(tokenLimit(DEFAULT_GEMINI_MODEL, undefined)).toBe(1_048_576);
+    expect(tokenLimit(DEFAULT_GEMINI_FLASH_MODEL, undefined)).toBe(1_048_576);
+    expect(tokenLimit(DEFAULT_GEMINI_FLASH_LITE_MODEL, undefined)).toBe(
+      1_048_576,
+    );
   });
 
   it('should return the correct token limit for preview models', () => {
-    expect(tokenLimit(PREVIEW_GEMINI_MODEL)).toBe(1_048_576);
-    expect(tokenLimit(PREVIEW_GEMINI_FLASH_MODEL)).toBe(1_048_576);
+    expect(tokenLimit(PREVIEW_GEMINI_MODEL, undefined)).toBe(1_048_576);
+    expect(tokenLimit(PREVIEW_GEMINI_FLASH_MODEL, undefined)).toBe(1_048_576);
   });
 
   it('should return the default token limit for an unknown model', () => {
-    expect(tokenLimit('unknown-model')).toBe(DEFAULT_TOKEN_LIMIT);
+    expect(tokenLimit('unknown-model', undefined)).toBe(DEFAULT_TOKEN_LIMIT);
   });
 
   it('should return the default token limit if no model is provided', () => {
     // @ts-expect-error testing invalid input
-    expect(tokenLimit(undefined)).toBe(DEFAULT_TOKEN_LIMIT);
+    expect(tokenLimit(undefined, undefined)).toBe(DEFAULT_TOKEN_LIMIT);
   });
 
   it('should have the correct default token limit value', () => {

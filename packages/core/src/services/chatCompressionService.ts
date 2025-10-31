@@ -264,7 +264,7 @@ export class ChatCompressionService {
       const threshold =
         (await config.getCompressionThreshold()) ??
         DEFAULT_COMPRESSION_TOKEN_THRESHOLD;
-      if (originalTokenCount < threshold * tokenLimit(model)) {
+      if (originalTokenCount < threshold * tokenLimit(model, config)) {
         return {
           newHistory: null,
           info: {

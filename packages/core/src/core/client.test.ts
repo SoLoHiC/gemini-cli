@@ -1459,7 +1459,7 @@ ${JSON.stringify(
           remainingTokenCount,
         },
       });
-      expect(tokenLimit).toHaveBeenCalledWith(STICKY_MODEL);
+      expect(tokenLimit).toHaveBeenCalledWith(STICKY_MODEL, expect.any(Object));
       expect(mockTurnRunFn).not.toHaveBeenCalled();
     });
 
