@@ -12,7 +12,7 @@ import { DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES } from '../constants.js';
 import type {
   OpenAICompatibleProvider,
   DashScopeRequestMetadata,
-  ChatCompletionContentPartWithCache,
+  ChatCompletionContentPartTextWithCache,
   ChatCompletionToolWithCache,
 } from './types.js';
 
@@ -162,10 +162,7 @@ export class DashScopeOpenAICompatibleProvider
                 return message;
               }
 
-              return {
-                ...message,
-                content: this.addCacheControlToContent(message.content),
-              };
+              return this.addCacheControlToMessage(message);
             },
           );
 
@@ -197,54 +194,158 @@ export class DashScopeOpenAICompatibleProvider
     return updatedTools;
   }
 
-  private addCacheControlToContent(
-    content: NonNullable<OpenAI.Chat.ChatCompletionMessageParam['content']>,
-  ): ChatCompletionContentPartWithCache[] {
-    const contentArray = this.normalizeContentToArray(content);
-
-    return this.addCacheControlToContentArray(contentArray);
-  }
-
-  private normalizeContentToArray(
-    content: NonNullable<OpenAI.Chat.ChatCompletionMessageParam['content']>,
-  ): ChatCompletionContentPartWithCache[] {
-    if (typeof content === 'string') {
-      return [
-        {
-          type: 'text',
-          text: content,
-        },
-      ];
+  private addCacheControlToMessage(
+    message:
+      | OpenAI.Chat.ChatCompletionDeveloperMessageParam
+      | OpenAI.Chat.ChatCompletionSystemMessageParam
+      | OpenAI.Chat.ChatCompletionUserMessageParam
+      | OpenAI.Chat.ChatCompletionAssistantMessageParam
+      | OpenAI.Chat.ChatCompletionToolMessageParam,
+  ): OpenAI.Chat.ChatCompletionMessageParam {
+    switch (message.role) {
+      case 'developer':
+      case 'system':
+      case 'tool':
+        return {
+          ...message,
+          content: this.addCacheControlToTextContent(message.content),
+        };
+      case 'assistant':
+        if (message.content === undefined || message.content === null) {
+          return message;
+        }
+        return {
+          ...message,
+          content: this.addCacheControlToAssistantContent(message.content),
+        };
+      case 'user':
+        return {
+          ...message,
+          content: this.addCacheControlToUserContent(message.content),
+        };
+      default:
+        return message;
     }
-    return [...content];
   }
 
-  private addCacheControlToContentArray(
-    contentArray: ChatCompletionContentPartWithCache[],
-  ): ChatCompletionContentPartWithCache[] {
+  private createTextPart(
+    text: string,
+  ): OpenAI.Chat.ChatCompletionContentPartText {
+    return {
+      type: 'text',
+      text,
+    };
+  }
+
+  private createEphemeralTextPart(
+    text: string,
+  ): ChatCompletionContentPartTextWithCache {
+    return {
+      type: 'text',
+      text,
+      cache_control: { type: 'ephemeral' },
+    };
+  }
+
+  private addCacheControlToTextContent(
+    content: string | OpenAI.Chat.ChatCompletionContentPartText[],
+  ): OpenAI.Chat.ChatCompletionContentPartText[] {
+    const contentArray =
+      typeof content === 'string'
+        ? [this.createTextPart(content)]
+        : [...content];
+
+    return this.addCacheControlToTextContentArray(contentArray);
+  }
+
+  private addCacheControlToAssistantContent(
+    content:
+      | string
+      | Array<
+          | OpenAI.Chat.ChatCompletionContentPartText
+          | OpenAI.Chat.ChatCompletionContentPartRefusal
+        >,
+  ):
+    | string
+    | Array<
+        | OpenAI.Chat.ChatCompletionContentPartText
+        | OpenAI.Chat.ChatCompletionContentPartRefusal
+      > {
+    const contentArray =
+      typeof content === 'string'
+        ? [this.createTextPart(content)]
+        : [...content];
+
+    return this.addCacheControlToAssistantContentArray(contentArray);
+  }
+
+  private addCacheControlToUserContent(
+    content: string | OpenAI.Chat.ChatCompletionContentPart[],
+  ): OpenAI.Chat.ChatCompletionContentPart[] {
+    const contentArray =
+      typeof content === 'string'
+        ? [this.createTextPart(content)]
+        : [...content];
+
+    return this.addCacheControlToUserContentArray(contentArray);
+  }
+
+  private addCacheControlToTextContentArray(
+    contentArray: OpenAI.Chat.ChatCompletionContentPartText[],
+  ): OpenAI.Chat.ChatCompletionContentPartText[] {
     if (contentArray.length === 0) {
-      return [
-        {
-          type: 'text',
-          text: '',
-          cache_control: { type: 'ephemeral' },
-        },
-      ];
+      return [this.createEphemeralTextPart('')];
+    }
+
+    const lastItem = contentArray[contentArray.length - 1];
+    contentArray[contentArray.length - 1] = this.createEphemeralTextPart(
+      lastItem.text,
+    );
+
+    return contentArray;
+  }
+
+  private addCacheControlToAssistantContentArray(
+    contentArray: Array<
+      | OpenAI.Chat.ChatCompletionContentPartText
+      | OpenAI.Chat.ChatCompletionContentPartRefusal
+    >,
+  ): Array<
+    | OpenAI.Chat.ChatCompletionContentPartText
+    | OpenAI.Chat.ChatCompletionContentPartRefusal
+  > {
+    if (contentArray.length === 0) {
+      return [this.createEphemeralTextPart('')];
     }
 
     const lastItem = contentArray[contentArray.length - 1];
 
     if (lastItem.type === 'text') {
-      contentArray[contentArray.length - 1] = {
-        ...lastItem,
-        cache_control: { type: 'ephemeral' },
-      };
+      contentArray[contentArray.length - 1] = this.createEphemeralTextPart(
+        lastItem.text,
+      );
     } else {
-      contentArray.push({
-        type: 'text',
-        text: '',
-        cache_control: { type: 'ephemeral' },
-      });
+      contentArray.push(this.createEphemeralTextPart(''));
+    }
+
+    return contentArray;
+  }
+
+  private addCacheControlToUserContentArray(
+    contentArray: OpenAI.Chat.ChatCompletionContentPart[],
+  ): OpenAI.Chat.ChatCompletionContentPart[] {
+    if (contentArray.length === 0) {
+      return [this.createEphemeralTextPart('')];
+    }
+
+    const lastItem = contentArray[contentArray.length - 1];
+
+    if (lastItem.type === 'text') {
+      contentArray[contentArray.length - 1] = this.createEphemeralTextPart(
+        lastItem.text,
+      );
+    } else {
+      contentArray.push(this.createEphemeralTextPart(''));
     }
 
     return contentArray;

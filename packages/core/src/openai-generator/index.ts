@@ -6,7 +6,7 @@
 
 import type {
   ContentGenerator,
-  type ContentGeneratorConfig,
+  ContentGeneratorConfig,
 } from '../core/contentGenerator.js';
 import type { Config } from '../config/config.js';
 import { OpenAIContentGenerator } from './openaiContentGenerator.js';

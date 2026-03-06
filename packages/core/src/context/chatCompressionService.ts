@@ -34,7 +34,7 @@ import {
 } from '../config/models.js';
 import { PreCompressTrigger } from '../hooks/types.js';
 import { isGoogleAuthType } from '../core/contentGenerator.js';
-import type { ModelConfigKey } from './modelConfigService.js';
+import type { ModelConfigKey } from '../services/modelConfigService.js';
 
 /**
  * Default threshold for compression token count as a fraction of the model's

@@ -24,6 +24,7 @@ import {
   type ContentGenerator,
   type ContentGeneratorConfig,
   type VertexAiRoutingConfig,
+  isGoogleAuthType,
 } from '../core/contentGenerator.js';
 import type { OverageStrategy } from '../billing/billing.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
@@ -136,8 +137,6 @@ import { MemoryContextManager } from '../context/memoryContextManager.js';
 import { TrackerService } from '../services/trackerService.js';
 import type { GenerateContentParameters } from '@google/genai';
 
-// Re-export OAuth config type
-export type { MCPOAuthConfig, AnyToolInvocation, AnyDeclarativeTool };
 import type { AnyToolInvocation, AnyDeclarativeTool } from '../tools/tools.js';
 import { WorkspaceContext } from '../utils/workspaceContext.js';
 import { getWorkspaceContextOverride } from './scoped-config.js';
@@ -196,7 +195,7 @@ import {
   DEFAULT_MIN_PRUNABLE_TOKENS_THRESHOLD,
   DEFAULT_PROTECT_LATEST_TURN,
   DEFAULT_TOOL_PROTECTION_THRESHOLD,
-} from '../services/toolOutputMaskingService.js';
+} from '../context/toolOutputMaskingService.js';
 
 import {
   type ExtensionLoader,
@@ -206,7 +205,6 @@ import { McpClientManager } from '../tools/mcp-client-manager.js';
 import { A2AClientManager } from '../agents/a2a-client-manager.js';
 import { type McpContext } from '../tools/mcp-client.js';
 import type { EnvironmentSanitizationConfig } from '../services/environmentSanitization.js';
-import { getErrorMessage } from '../utils/errors.js';
 
 // Re-export OAuth config type
 export type { MCPOAuthConfig, AnyToolInvocation, AnyDeclarativeTool };
@@ -464,27 +462,6 @@ export interface ExtensionInstallMetadata {
   autoUpdate?: boolean;
   allowPreRelease?: boolean;
 }
-
-import { DEFAULT_MAX_ATTEMPTS } from '../utils/retry.js';
-import {
-  DEFAULT_FILE_FILTERING_OPTIONS,
-  DEFAULT_MEMORY_FILE_FILTERING_OPTIONS,
-  type FileFilteringOptions,
-} from './constants.js';
-import {
-  DEFAULT_TOOL_PROTECTION_THRESHOLD,
-  DEFAULT_MIN_PRUNABLE_TOKENS_THRESHOLD,
-  DEFAULT_PROTECT_LATEST_TURN,
-} from '../context/toolOutputMaskingService.js';
-
-import {
-  type ExtensionLoader,
-  SimpleExtensionLoader,
-} from '../utils/extensionLoader.js';
-import { McpClientManager } from '../tools/mcp-client-manager.js';
-import { A2AClientManager } from '../agents/a2a-client-manager.js';
-import { type McpContext } from '../tools/mcp-client.js';
-import type { EnvironmentSanitizationConfig } from '../services/environmentSanitization.js';
 
 export type { FileFilteringOptions };
 export {

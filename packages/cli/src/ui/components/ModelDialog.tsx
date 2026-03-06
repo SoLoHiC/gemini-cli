@@ -25,7 +25,6 @@ import {
   AuthType,
   PREVIEW_GEMINI_3_1_CUSTOM_TOOLS_MODEL,
   isProModel,
-  UserTierId,
   isAnthropicAuthType,
   isOpenAIAuthType,
   debugLogger,
