@@ -250,6 +250,52 @@ describe('ContentGenerationPipeline', () => {
       );
     });
 
+    it('should map request.config.maxOutputTokens to max_tokens', async () => {
+      const request: GenerateContentParameters = {
+        model: 'test-model',
+        contents: [{ parts: [{ text: 'Hello' }], role: 'user' }],
+        config: {
+          maxOutputTokens: 2048,
+        },
+      };
+      const userPromptId = 'test-prompt-id';
+
+      const mockMessages = [
+        { role: 'user', content: 'Hello' },
+      ] as OpenAI.Chat.ChatCompletionMessageParam[];
+      const mockOpenAIResponse = {
+        id: 'response-id',
+        choices: [
+          { message: { content: 'Hello response' }, finish_reason: 'stop' },
+        ],
+      } as OpenAI.Chat.ChatCompletion;
+      const mockGeminiResponse = new GenerateContentResponse();
+
+      mockContentGeneratorConfig.samplingParams = undefined;
+      (mockConverter.convertGeminiRequestToOpenAI as Mock).mockReturnValue(
+        mockMessages,
+      );
+      (mockConverter.convertOpenAIResponseToGemini as Mock).mockReturnValue(
+        mockGeminiResponse,
+      );
+      (mockClient.chat.completions.create as Mock).mockResolvedValue(
+        mockOpenAIResponse,
+      );
+
+      await pipeline.execute(request, userPromptId);
+
+      expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'test-model',
+          messages: mockMessages,
+          max_tokens: 2048,
+        }),
+        expect.objectContaining({
+          signal: undefined,
+        }),
+      );
+    });
+
     it('should handle errors and log them', async () => {
       // Arrange
       const request: GenerateContentParameters = {

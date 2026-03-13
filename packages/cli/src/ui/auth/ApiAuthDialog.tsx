@@ -11,11 +11,18 @@ import { theme } from '../semantic-colors.js';
 import { TextInput } from '../components/shared/TextInput.js';
 import { useTextBuffer } from '../components/shared/text-buffer.js';
 import { useUIState } from '../contexts/UIStateContext.js';
-import { clearApiKey, debugLogger } from '@google/gemini-cli-core';
+import {
+  AuthType,
+  clearApiKey,
+  debugLogger,
+  isOpenAIAuthType,
+  normalizeAuthType,
+} from '@google/gemini-cli-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { keyMatchers, Command } from '../keyMatchers.js';
 
 interface ApiAuthDialogProps {
+  authType?: AuthType;
   onSubmit: (apiKey: string) => void;
   onCancel: () => void;
   error?: string | null;
@@ -23,6 +30,7 @@ interface ApiAuthDialogProps {
 }
 
 export function ApiAuthDialog({
+  authType,
   onSubmit,
   onCancel,
   error,
@@ -41,6 +49,20 @@ export function ApiAuthDialog({
   );
 
   const initialApiKey = defaultValue;
+  const normalizedAuthType =
+    normalizeAuthType(authType) ?? AuthType.USE_GEMINI;
+  const providerLabel =
+    normalizedAuthType === AuthType.USE_GEMINI
+      ? 'Gemini'
+      : isOpenAIAuthType(normalizedAuthType)
+        ? 'OpenAI'
+        : 'Anthropic';
+  const helperUrl =
+    normalizedAuthType === AuthType.USE_GEMINI
+      ? 'https://aistudio.google.com/app/apikey'
+      : isOpenAIAuthType(normalizedAuthType)
+        ? 'https://platform.openai.com/api-keys'
+        : 'https://console.anthropic.com/settings/keys';
 
   const buffer = useTextBuffer({
     initialText: initialApiKey || '',
@@ -59,6 +81,11 @@ export function ApiAuthDialog({
   };
 
   const handleClear = () => {
+    if (normalizedAuthType !== AuthType.USE_GEMINI) {
+      buffer.setText('');
+      return Promise.resolve();
+    }
+
     pendingPromise.current?.cancel();
 
     let isCancelled = false;
@@ -104,17 +131,18 @@ export function ApiAuthDialog({
       width="100%"
     >
       <Text bold color={theme.text.primary}>
-        Enter Gemini API Key
+        Enter {providerLabel} API Key
       </Text>
       <Box marginTop={1} flexDirection="column">
         <Text color={theme.text.primary}>
-          Please enter your Gemini API key. It will be securely stored in your
-          system keychain.
+          {normalizedAuthType === AuthType.USE_GEMINI
+            ? 'Please enter your Gemini API key. It will be securely stored in your system keychain.'
+            : `Please enter your ${providerLabel} API key. It will be stored in settings.security.auth.apiKey for this workspace.`}
         </Text>
         <Text color={theme.text.secondary}>
           You can get an API key from{' '}
           <Text color={theme.text.link}>
-            https://aistudio.google.com/app/apikey
+            {helperUrl}
           </Text>
         </Text>
       </Box>
@@ -140,7 +168,9 @@ export function ApiAuthDialog({
       )}
       <Box marginTop={1}>
         <Text color={theme.text.secondary}>
-          (Press Enter to submit, Esc to cancel, Ctrl+C to clear stored key)
+          {normalizedAuthType === AuthType.USE_GEMINI
+            ? '(Press Enter to submit, Esc to cancel, Ctrl+C to clear stored key)'
+            : '(Press Enter to submit, Esc to cancel, Ctrl+C to clear the input)'}
         </Text>
       </Box>
     </Box>

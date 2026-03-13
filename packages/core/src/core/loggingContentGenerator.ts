@@ -38,6 +38,7 @@ import { isStructuredError } from '../utils/quotaErrorDetection.js';
 import { runInDevTraceSpan, type SpanMetadata } from '../telemetry/trace.js';
 import { debugLogger } from '../utils/debugLogger.js';
 import { isAbortError, getErrorType } from '../utils/errors.js';
+import { isProviderAuthType, normalizeAuthType } from './contentGenerator.js';
 import {
   GeminiCliOperation,
   GEN_AI_PROMPT_NAME,
@@ -210,6 +211,21 @@ export class LoggingContentGenerator implements ContentGenerator {
     }
 
     const genConfig = this.config.getContentGeneratorConfig();
+    const normalizedAuthType = normalizeAuthType(genConfig?.authType);
+
+    if (genConfig?.baseUrl && isProviderAuthType(normalizedAuthType)) {
+      try {
+        const url = new URL(genConfig.baseUrl);
+        const port = url.port
+          ? parseInt(url.port, 10)
+          : url.protocol === 'https:'
+            ? 443
+            : 80;
+        return { address: url.hostname, port };
+      } catch {
+        return { address: 'unknown', port: 0 };
+      }
+    }
 
     // Case 2: Using an API key for Vertex AI.
     if (genConfig?.vertexai) {

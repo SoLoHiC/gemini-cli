@@ -23,6 +23,10 @@ import { ApprovalModeStrategy } from './strategies/approvalModeStrategy.js';
 import { logModelRouting } from '../telemetry/loggers.js';
 import { ModelRoutingEvent } from '../telemetry/types.js';
 import { debugLogger } from '../utils/debugLogger.js';
+import {
+  isProviderAuthType,
+  normalizeAuthType,
+} from '../core/contentGenerator.js';
 
 /**
  * A centralized service for making model routing decisions.
@@ -87,12 +91,30 @@ export class ModelRouterService {
     let error_message: string | undefined;
 
     try {
-      decision = await this.strategy.route(
-        context,
-        this.config,
-        this.config.getBaseLlmClient(),
-        this.config.getLocalLiteRtLmClient(),
+      const authType = normalizeAuthType(
+        this.config.getContentGeneratorConfig()?.authType,
       );
+      if (isProviderAuthType(authType)) {
+        const model =
+          context.requestedModel ??
+          this.config.getActiveModel?.() ??
+          this.config.getModel();
+        decision = {
+          model,
+          metadata: {
+            source: 'provider-fixed',
+            latencyMs: Date.now() - startTime,
+            reasoning: `Routing bypassed for ${authType}. Using configured provider model.`,
+          },
+        };
+      } else {
+        decision = await this.strategy.route(
+          context,
+          this.config,
+          this.config.getBaseLlmClient(),
+          this.config.getLocalLiteRtLmClient(),
+        );
+      }
 
       debugLogger.debug(
         `[Routing] Selected model: ${decision.model} (Source: ${decision.metadata.source}, Latency: ${decision.metadata.latencyMs}ms)\n\t[Routing] Reasoning: ${decision.metadata.reasoning}`,

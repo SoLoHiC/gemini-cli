@@ -21,12 +21,17 @@ import {
   getDisplayString,
   AuthType,
   PREVIEW_GEMINI_3_1_CUSTOM_TOOLS_MODEL,
+  isAnthropicAuthType,
+  isOpenAIAuthType,
+  normalizeAuthType,
+  debugLogger,
 } from '@google/gemini-cli-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { theme } from '../semantic-colors.js';
 import { DescriptiveRadioButtonSelect } from './shared/DescriptiveRadioButtonSelect.js';
 import { ConfigContext } from '../contexts/ConfigContext.js';
 import { useSettings } from '../contexts/SettingsContext.js';
+import { SettingScope } from '../../config/settings.js';
 
 interface ModelDialogProps {
   onClose: () => void;
@@ -43,7 +48,9 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
 
   const shouldShowPreviewModels = config?.getHasAccessToPreviewModel();
   const useGemini31 = config?.getGemini31LaunchedSync?.() ?? false;
-  const selectedAuthType = settings.merged.security.auth.selectedType;
+  const selectedAuthType = normalizeAuthType(
+    settings.merged.security.auth.selectedType,
+  );
   const useCustomToolModel =
     useGemini31 && selectedAuthType === AuthType.USE_GEMINI;
 
@@ -158,7 +165,43 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
     return list;
   }, [shouldShowPreviewModels, useGemini31, useCustomToolModel]);
 
-  const options = view === 'main' ? mainOptions : manualOptions;
+  const providerOptions = useMemo(() => {
+    const options: Array<{
+      value: string;
+      title: string;
+      description: string;
+      key: string;
+      authType: AuthType;
+    }> = [];
+
+    for (const entry of settings.merged.modelProviders?.openai ?? []) {
+      options.push({
+        value: entry.id,
+        title: entry.name ? `${entry.name} (OpenAI)` : `${entry.id} (OpenAI)`,
+        description: entry.description || 'Use this OpenAI-compatible model',
+        key: `openai:${entry.id}`,
+        authType: AuthType.USE_OPENAI,
+      });
+    }
+
+    for (const entry of settings.merged.modelProviders?.anthropic ?? []) {
+      options.push({
+        value: entry.id,
+        title: entry.name
+          ? `${entry.name} (Anthropic)`
+          : `${entry.id} (Anthropic)`,
+        description:
+          entry.description || 'Use this Anthropic-compatible model',
+        key: `anthropic:${entry.id}`,
+        authType: AuthType.USE_ANTHROPIC,
+      });
+    }
+
+    return options;
+  }, [settings.merged.modelProviders]);
+
+  const options =
+    view === 'main' ? [...mainOptions, ...providerOptions] : manualOptions;
 
   // Calculate the initial index based on the preferred model.
   const initialIndex = useMemo(() => {
@@ -181,14 +224,41 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
         return;
       }
 
+      const providerOption = providerOptions.find((option) => option.value === model);
       if (config) {
-        config.setModel(model, persistMode ? false : true);
+        if (providerOption) {
+          settings.setValue(
+            SettingScope.User,
+            'security.auth.selectedType',
+            providerOption.authType,
+          );
+          config.setModel(model, persistMode ? false : true);
+          void config.refreshAuth(providerOption.authType).catch((error) => {
+            debugLogger.error('Failed to switch provider model:', error);
+          });
+        } else {
+          const selectedAuthType = normalizeAuthType(
+            settings.merged.security.auth.selectedType,
+          );
+          if (
+            selectedAuthType &&
+            (isOpenAIAuthType(selectedAuthType) ||
+              isAnthropicAuthType(selectedAuthType))
+          ) {
+            settings.setValue(
+              SettingScope.User,
+              'security.auth.selectedType',
+              AuthType.USE_GEMINI,
+            );
+          }
+          config.setModel(model, persistMode ? false : true);
+        }
         const event = new ModelSlashCommandEvent(model);
         logModelSlashCommand(config, event);
       }
       onClose();
     },
-    [config, onClose, persistMode],
+    [config, onClose, persistMode, providerOptions, settings],
   );
 
   return (

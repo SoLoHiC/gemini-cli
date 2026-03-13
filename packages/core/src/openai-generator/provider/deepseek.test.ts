@@ -128,5 +128,22 @@ describe('DeepSeekOpenAICompatibleProvider', () => {
         provider.buildRequest(originalRequest, userPromptId),
       ).toThrow(/only supports text content/i);
     });
+
+    it('clamps max_tokens to the DeepSeek limit', () => {
+      const originalRequest: OpenAI.Chat.ChatCompletionCreateParams = {
+        model: 'deepseek-chat',
+        max_tokens: 16000,
+        messages: [
+          {
+            role: 'user',
+            content: 'Hello world',
+          },
+        ],
+      };
+
+      const result = provider.buildRequest(originalRequest, userPromptId);
+
+      expect(result.max_tokens).toBe(8192);
+    });
   });
 });

@@ -7,7 +7,10 @@
 import type OpenAI from 'openai';
 import type { Config } from '../../config/config.js';
 import type { ContentGeneratorConfig } from '../../core/contentGenerator.js';
+import { debugLogger } from '../../utils/debugLogger.js';
 import { DefaultOpenAICompatibleProvider } from './default.js';
+
+const DEEPSEEK_MAX_OUTPUT_TOKENS = 8192;
 
 export class DeepSeekOpenAICompatibleProvider extends DefaultOpenAICompatibleProvider {
   constructor(
@@ -30,6 +33,18 @@ export class DeepSeekOpenAICompatibleProvider extends DefaultOpenAICompatiblePro
     userPromptId: string,
   ): OpenAI.Chat.ChatCompletionCreateParams {
     const baseRequest = super.buildRequest(request, userPromptId);
+    if (baseRequest.temperature === undefined) {
+      baseRequest.temperature = 0;
+    }
+    if (
+      typeof baseRequest.max_tokens === 'number' &&
+      baseRequest.max_tokens > DEEPSEEK_MAX_OUTPUT_TOKENS
+    ) {
+      debugLogger.warn(
+        `DeepSeek max_tokens ${baseRequest.max_tokens} exceeds provider limit ${DEEPSEEK_MAX_OUTPUT_TOKENS}; clamping the request.`,
+      );
+      baseRequest.max_tokens = DEEPSEEK_MAX_OUTPUT_TOKENS;
+    }
     if (!baseRequest.messages?.length) {
       return baseRequest;
     }

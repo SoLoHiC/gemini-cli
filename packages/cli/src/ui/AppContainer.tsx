@@ -57,6 +57,8 @@ import {
   getAllGeminiMdFilenames,
   AuthType,
   clearCachedCredentialFile,
+  isProviderAuthType,
+  normalizeAuthType,
   type ResumedSessionData,
   recordExitFail,
   ShellExecutionService,
@@ -804,16 +806,37 @@ Logging in with Google... Restarting Gemini CLI to continue.
     async (apiKey: string) => {
       try {
         onAuthError(null);
-        if (!apiKey.trim() && apiKey.length > 1) {
+        const trimmedApiKey = apiKey.trim();
+        if (!trimmedApiKey && apiKey.length > 1) {
           onAuthError(
             'API key cannot be empty string with length greater than 1.',
           );
           return;
         }
 
-        await saveApiKey(apiKey);
-        await reloadApiKey();
-        await config.refreshAuth(AuthType.USE_GEMINI);
+        const selectedAuthType = normalizeAuthType(
+          settings.merged.security.auth.selectedType,
+        );
+
+        if (selectedAuthType === AuthType.USE_GEMINI) {
+          await saveApiKey(trimmedApiKey);
+          await reloadApiKey();
+          await config.refreshAuth(AuthType.USE_GEMINI);
+        } else if (selectedAuthType && isProviderAuthType(selectedAuthType)) {
+          settings.setValue(
+            SettingScope.User,
+            'security.auth.apiKey',
+            trimmedApiKey || undefined,
+          );
+          config.setProviderApiKey(trimmedApiKey || undefined);
+          config.setProviderBaseUrl(settings.merged.security.auth.baseUrl);
+          await reloadApiKey();
+          await config.refreshAuth(selectedAuthType, trimmedApiKey || undefined);
+        } else {
+          onAuthError('No API-key auth method is currently selected.');
+          return;
+        }
+
         setAuthState(AuthState.Authenticated);
       } catch (e) {
         onAuthError(
@@ -821,7 +844,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
         );
       }
     },
-    [setAuthState, onAuthError, reloadApiKey, config],
+    [setAuthState, onAuthError, reloadApiKey, config, settings],
   );
 
   const handleApiKeyCancel = useCallback(() => {

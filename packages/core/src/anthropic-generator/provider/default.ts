@@ -32,6 +32,7 @@ export class DefaultAnthropicCompatibleProvider
     const userAgent = `GeminiCLI/${version} (${process.platform}; ${process.arch})`;
     return {
       'User-Agent': userAgent,
+      ...this.contentGeneratorConfig.customHeaders,
     };
   }
 
@@ -56,8 +57,31 @@ export class DefaultAnthropicCompatibleProvider
     request: Anthropic.Messages.MessageCreateParams,
     _userPromptId: string,
   ): Anthropic.Messages.MessageCreateParams {
-    return {
+    const mergedRequest = {
       ...request,
-    };
+    } as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+    const samplingParams = this.contentGeneratorConfig.samplingParams;
+
+    if (samplingParams?.temperature !== undefined && mergedRequest.temperature === undefined) {
+      mergedRequest.temperature = samplingParams.temperature;
+    }
+    if (samplingParams?.top_p !== undefined && mergedRequest.top_p === undefined) {
+      mergedRequest.top_p = samplingParams.top_p;
+    }
+    if (samplingParams?.top_k !== undefined && mergedRequest.top_k === undefined) {
+      mergedRequest.top_k = samplingParams.top_k;
+    }
+    if (samplingParams?.max_tokens !== undefined && mergedRequest.max_tokens === undefined) {
+      mergedRequest.max_tokens = samplingParams.max_tokens;
+    }
+    if (
+      this.contentGeneratorConfig.reasoning !== undefined &&
+      mergedRequest['thinking'] === undefined
+    ) {
+      mergedRequest['thinking'] =
+        this.contentGeneratorConfig.reasoning as unknown as Anthropic.ThinkingConfigParam;
+    }
+
+    return mergedRequest;
   }
 }

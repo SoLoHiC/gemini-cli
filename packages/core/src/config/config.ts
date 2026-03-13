@@ -15,6 +15,7 @@ import {
   createContentGeneratorConfig,
   type ContentGenerator,
   type ContentGeneratorConfig,
+  normalizeAuthType,
 } from '../core/contentGenerator.js';
 import type { OverageStrategy } from '../billing/billing.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
@@ -469,7 +470,40 @@ export interface PolicyUpdateConfirmationRequest {
   newHash: string;
 }
 
+export interface ProviderGenerationConfig {
+  timeout?: number;
+  maxRetries?: number;
+  retryErrorCodes?: number[];
+  enableCacheControl?: boolean;
+  samplingParams?: ContentGeneratorConfig['samplingParams'];
+  reasoning?: Record<string, unknown>;
+  schemaCompliance?: Record<string, unknown>;
+  contextWindowSize?: number;
+  customHeaders?: Record<string, string>;
+  extra_body?: Record<string, unknown>;
+  modalities?: string[];
+  embeddingModel?: string;
+}
+
+export interface ModelProviderConfig {
+  id: string;
+  name?: string;
+  description?: string;
+  envKey?: string;
+  baseUrl?: string;
+  tokenLimit?: number;
+  generationConfig?: ProviderGenerationConfig;
+}
+
+export interface ModelProvidersConfig {
+  openai?: ModelProviderConfig[];
+  anthropic?: ModelProviderConfig[];
+}
+
 export interface CompatibleModelConfig extends ContentGeneratorConfig {
+  model: string;
+  name?: string;
+  description?: string;
   tokenLimit?: number;
 }
 
@@ -519,6 +553,8 @@ export interface ConfigParameters {
   model: string;
   disableLoopDetection?: boolean;
   compatibleModels?: CompatibleModelConfig[];
+  providerApiKey?: string;
+  providerBaseUrl?: string;
   maxSessionTurns?: number;
   experimentalZedIntegration?: boolean;
   listSessions?: boolean;
@@ -676,6 +712,8 @@ export class Config implements McpContext {
   // null = unknown (quota not fetched); true = has access; false = definitively no access
   private hasAccessToPreviewModel: boolean | null = null;
   private readonly compatibleModels: CompatibleModelConfig[];
+  private providerApiKey: string | undefined;
+  private providerBaseUrl: string | undefined;
   private readonly noBrowser: boolean;
   private readonly folderTrust: boolean;
   private ideMode: boolean;
@@ -916,6 +954,8 @@ export class Config implements McpContext {
         DEFAULT_PROTECT_LATEST_TURN,
     };
     this.compatibleModels = params.compatibleModels ?? [];
+    this.providerApiKey = params.providerApiKey;
+    this.providerBaseUrl = params.providerBaseUrl;
     this.maxSessionTurns = params.maxSessionTurns ?? -1;
     this.experimentalZedIntegration =
       params.experimentalZedIntegration ?? false;
@@ -1104,6 +1144,22 @@ export class Config implements McpContext {
     return this.compatibleModels;
   }
 
+  getProviderApiKey(): string | undefined {
+    return this.providerApiKey;
+  }
+
+  setProviderApiKey(apiKey: string | undefined): void {
+    this.providerApiKey = apiKey;
+  }
+
+  getProviderBaseUrl(): string | undefined {
+    return this.providerBaseUrl;
+  }
+
+  setProviderBaseUrl(baseUrl: string | undefined): void {
+    this.providerBaseUrl = baseUrl;
+  }
+
   /**
    * Dedups initialization requests using a shared promise that is only resolved
    * once.
@@ -1219,6 +1275,7 @@ export class Config implements McpContext {
   }
 
   async refreshAuth(authMethod: AuthType, apiKey?: string) {
+    const normalizedAuthMethod = normalizeAuthType(authMethod) ?? authMethod;
     // Reset availability service when switching auth
     this.modelAvailabilityService.reset();
 
@@ -1226,7 +1283,7 @@ export class Config implements McpContext {
     // thoughtSignature from Genai to Vertex will fail, we need to strip them
     if (
       this.contentGeneratorConfig?.authType === AuthType.USE_GEMINI &&
-      authMethod !== AuthType.USE_GEMINI
+      normalizedAuthMethod !== AuthType.USE_GEMINI
     ) {
       // Restore the conversation history to the new client
       this.geminiClient.stripThoughtsFromHistory();
@@ -1240,10 +1297,13 @@ export class Config implements McpContext {
     if (this.contentGeneratorConfig) {
       this.contentGeneratorConfig.authType = undefined;
     }
+    if (apiKey !== undefined) {
+      this.providerApiKey = apiKey;
+    }
 
     const newContentGeneratorConfig = await createContentGeneratorConfig(
       this,
-      authMethod,
+      normalizedAuthMethod,
       apiKey,
     );
     this.contentGenerator = await createContentGenerator(

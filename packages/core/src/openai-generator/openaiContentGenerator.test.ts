@@ -71,6 +71,7 @@ describe('OpenAIContentGenerator (Refactored)', () => {
 
     // Create generator instance
     const contentGeneratorConfig = {
+      model: 'gpt-4o-mini',
       authType: AuthType.OPENAI_COMPATIBLE,
       enableOpenAILogging: false,
       timeout: 120000,

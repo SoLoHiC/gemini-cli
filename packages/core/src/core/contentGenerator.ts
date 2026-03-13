@@ -25,8 +25,7 @@ import { parseCustomHeaders } from '../utils/customHeaderUtils.js';
 import { RecordingContentGenerator } from './recordingContentGenerator.js';
 import { getVersion, resolveModel } from '../../index.js';
 import type { LlmRole } from '../telemetry/llmRole.js';
-import { OpenAIContentGenerator } from '../openai-generator/index.js';
-import { DefaultOpenAICompatibleProvider } from '../openai-generator/provider/default.js';
+import { createOpenAIContentGenerator } from '../openai-generator/index.js';
 import { AnthropicContentGenerator } from '../anthropic-generator/anthropicContentGenerator.js';
 import { createAnthropicCompatibleProvider } from '../anthropic-generator/index.js';
 
@@ -63,8 +62,44 @@ export enum AuthType {
   USE_VERTEX_AI = 'vertex-ai',
   LEGACY_CLOUD_SHELL = 'cloud-shell',
   COMPUTE_ADC = 'compute-default-credentials',
+  USE_OPENAI = 'openai',
+  USE_ANTHROPIC = 'anthropic',
   OPENAI_COMPATIBLE = 'openai-compatible',
   ANTHROPIC_COMPATIBLE = 'anthropic-compatible',
+}
+
+export function normalizeAuthType(authType?: AuthType): AuthType | undefined {
+  switch (authType) {
+    case AuthType.OPENAI_COMPATIBLE:
+      return AuthType.USE_OPENAI;
+    case AuthType.ANTHROPIC_COMPATIBLE:
+      return AuthType.USE_ANTHROPIC;
+    default:
+      return authType;
+  }
+}
+
+export function isGoogleAuthType(authType?: AuthType): boolean {
+  const normalized = normalizeAuthType(authType);
+  return (
+    normalized === AuthType.LOGIN_WITH_GOOGLE ||
+    normalized === AuthType.USE_GEMINI ||
+    normalized === AuthType.USE_VERTEX_AI ||
+    normalized === AuthType.COMPUTE_ADC ||
+    normalized === AuthType.LEGACY_CLOUD_SHELL
+  );
+}
+
+export function isOpenAIAuthType(authType?: AuthType): boolean {
+  return normalizeAuthType(authType) === AuthType.USE_OPENAI;
+}
+
+export function isAnthropicAuthType(authType?: AuthType): boolean {
+  return normalizeAuthType(authType) === AuthType.USE_ANTHROPIC;
+}
+
+export function isProviderAuthType(authType?: AuthType): boolean {
+  return isOpenAIAuthType(authType) || isAnthropicAuthType(authType);
 }
 
 /**
@@ -85,6 +120,12 @@ export function getAuthTypeFromEnv(): AuthType | undefined {
   if (process.env['GEMINI_API_KEY']) {
     return AuthType.USE_GEMINI;
   }
+  if (process.env['ANTHROPIC_API_KEY']) {
+    return AuthType.USE_ANTHROPIC;
+  }
+  if (process.env['OPENAI_API_KEY']) {
+    return AuthType.USE_OPENAI;
+  }
   if (
     process.env['CLOUD_SHELL'] === 'true' ||
     process.env['GEMINI_CLI_USE_COMPUTE_ADC'] === 'true'
@@ -101,10 +142,21 @@ export type ContentGeneratorConfig = {
   proxy?: string;
   model?: string;
   baseUrl?: string;
+  apiKeyEnvKey?: string;
   timeout?: number;
   maxRetries?: number;
+  retryErrorCodes?: number[];
+  enableCacheControl?: boolean;
   enableOpenAILogging?: boolean;
   disableCacheControl?: boolean;
+  reasoning?: Record<string, unknown>;
+  schemaCompliance?: Record<string, unknown>;
+  contextWindowSize?: number;
+  customHeaders?: Record<string, string>;
+  extra_body?: Record<string, unknown>;
+  modalities?: string[];
+  providerSubtype?: string;
+  embeddingModel?: string;
   samplingParams?: {
     top_p?: number;
     top_k?: number;
@@ -116,11 +168,63 @@ export type ContentGeneratorConfig = {
   };
 };
 
+const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
+
+type ProviderDefaults = {
+  apiKeyEnvKey: string;
+  modelEnvKey: string;
+  baseUrlEnvKey: string;
+  defaultBaseUrl: string;
+};
+
+function getProviderDefaults(authType: AuthType): ProviderDefaults {
+  if (authType === AuthType.USE_ANTHROPIC) {
+    return {
+      apiKeyEnvKey: 'ANTHROPIC_API_KEY',
+      modelEnvKey: 'ANTHROPIC_MODEL',
+      baseUrlEnvKey: 'ANTHROPIC_BASE_URL',
+      defaultBaseUrl: ANTHROPIC_DEFAULT_BASE_URL,
+    };
+  }
+
+  return {
+    apiKeyEnvKey: 'OPENAI_API_KEY',
+    modelEnvKey: 'OPENAI_MODEL',
+    baseUrlEnvKey: 'OPENAI_BASE_URL',
+    defaultBaseUrl: OPENAI_DEFAULT_BASE_URL,
+  };
+}
+
+function resolveProviderSubtype(
+  authType: AuthType,
+  baseUrl?: string,
+): string {
+  const normalizedBaseUrl = (baseUrl || '').toLowerCase();
+
+  if (authType === AuthType.USE_OPENAI) {
+    if (normalizedBaseUrl.includes('openrouter.ai')) {
+      return 'openrouter';
+    }
+    if (normalizedBaseUrl.includes('api.deepseek.com')) {
+      return 'deepseek-openai';
+    }
+    return 'default-openai';
+  }
+
+  if (normalizedBaseUrl.includes('api.deepseek.com')) {
+    return 'deepseek-anthropic';
+  }
+
+  return 'default-anthropic';
+}
+
 export async function createContentGeneratorConfig(
   config: Config,
   authType: AuthType | undefined,
   apiKey?: string,
 ): Promise<ContentGeneratorConfig> {
+  const normalizedAuthType = normalizeAuthType(authType);
   const geminiApiKey =
     apiKey ||
     process.env['GEMINI_API_KEY'] ||
@@ -133,39 +237,72 @@ export async function createContentGeneratorConfig(
     undefined;
   const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
 
-  // Handle compatible models first
-  if (
-    authType === AuthType.OPENAI_COMPATIBLE ||
-    authType === AuthType.ANTHROPIC_COMPATIBLE
-  ) {
+  if (normalizedAuthType && isProviderAuthType(normalizedAuthType)) {
     const modelName = config.getModel();
-    const compatibleModelConfig = config
-      .getCompatibleModels()
-      .find((m) => m.model === modelName);
+    const compatibleModelConfig = config.getCompatibleModels().find((candidate) => {
+      const candidateAuth = normalizeAuthType(candidate.authType);
+      if (candidateAuth && candidateAuth !== normalizedAuthType) {
+        return false;
+      }
+      return candidate.model === modelName;
+    });
+    const defaults = getProviderDefaults(normalizedAuthType);
+    const apiKeyEnvKey =
+      compatibleModelConfig?.apiKeyEnvKey ?? defaults.apiKeyEnvKey;
+    const resolvedApiKey =
+      apiKey ||
+      config.getProviderApiKey() ||
+      (apiKeyEnvKey ? process.env[apiKeyEnvKey] : undefined) ||
+      process.env[defaults.apiKeyEnvKey];
+    const resolvedBaseUrl =
+      config.getProviderBaseUrl() ||
+      compatibleModelConfig?.baseUrl ||
+      process.env[defaults.baseUrlEnvKey] ||
+      defaults.defaultBaseUrl;
+    const resolvedModel =
+      process.env[defaults.modelEnvKey] || compatibleModelConfig?.model || modelName;
 
-    if (compatibleModelConfig) {
-      return {
-        ...compatibleModelConfig,
-        authType,
-        proxy: config?.getProxy(),
-      };
+    if (!resolvedModel) {
+      throw new Error(
+        `No model configured for ${normalizedAuthType}. Set --model, ${defaults.modelEnvKey}, settings.model.name, or modelProviders.${normalizedAuthType === AuthType.USE_OPENAI ? 'openai' : 'anthropic'}.`,
+      );
     }
+
+    if (!resolvedApiKey) {
+      throw new Error(
+        `Missing API key for ${normalizedAuthType}. Set security.auth.apiKey, ${apiKeyEnvKey}, or ${defaults.apiKeyEnvKey}.`,
+      );
+    }
+
+    return {
+      ...compatibleModelConfig,
+      authType: normalizedAuthType,
+      proxy: config.getProxy(),
+      model: resolvedModel,
+      apiKey: resolvedApiKey,
+      apiKeyEnvKey,
+      baseUrl: resolvedBaseUrl,
+      providerSubtype: resolveProviderSubtype(
+        normalizedAuthType,
+        resolvedBaseUrl,
+      ),
+    };
   }
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
-    authType,
+    authType: normalizedAuthType,
     proxy: config?.getProxy(),
   };
 
   // If we are using Google auth or we are in Cloud Shell, there is nothing else to validate for now
   if (
-    authType === AuthType.LOGIN_WITH_GOOGLE ||
-    authType === AuthType.COMPUTE_ADC
+    normalizedAuthType === AuthType.LOGIN_WITH_GOOGLE ||
+    normalizedAuthType === AuthType.COMPUTE_ADC
   ) {
     return contentGeneratorConfig;
   }
 
-  if (authType === AuthType.USE_GEMINI && geminiApiKey) {
+  if (normalizedAuthType === AuthType.USE_GEMINI && geminiApiKey) {
     contentGeneratorConfig.apiKey = geminiApiKey;
     contentGeneratorConfig.vertexai = false;
 
@@ -173,7 +310,7 @@ export async function createContentGeneratorConfig(
   }
 
   if (
-    authType === AuthType.USE_VERTEX_AI &&
+    normalizedAuthType === AuthType.USE_VERTEX_AI &&
     (googleApiKey || (googleCloudProject && googleCloudLocation))
   ) {
     contentGeneratorConfig.apiKey = googleApiKey;
@@ -198,10 +335,11 @@ export async function createContentGenerator(
       return new LoggingContentGenerator(fakeGenerator, gcConfig);
     }
     const version = await getVersion();
+    const normalizedConfigAuthType = normalizeAuthType(config.authType);
     const model = resolveModel(
       gcConfig.getModel(),
-      config.authType === AuthType.USE_GEMINI ||
-        config.authType === AuthType.USE_VERTEX_AI ||
+      normalizedConfigAuthType === AuthType.USE_GEMINI ||
+        normalizedConfigAuthType === AuthType.USE_VERTEX_AI ||
         ((await gcConfig.getGemini31Launched?.()) ?? false),
     );
     const customHeadersEnv =
@@ -219,21 +357,21 @@ export async function createContentGenerator(
 
     if (
       apiKeyAuthMechanism === 'bearer' &&
-      (config.authType === AuthType.USE_GEMINI ||
-        config.authType === AuthType.USE_VERTEX_AI) &&
+      (normalizedConfigAuthType === AuthType.USE_GEMINI ||
+        normalizedConfigAuthType === AuthType.USE_VERTEX_AI) &&
       config.apiKey
     ) {
       baseHeaders['Authorization'] = `Bearer ${config.apiKey}`;
     }
     if (
-      config.authType === AuthType.LOGIN_WITH_GOOGLE ||
-      config.authType === AuthType.COMPUTE_ADC
+      normalizedConfigAuthType === AuthType.LOGIN_WITH_GOOGLE ||
+      normalizedConfigAuthType === AuthType.COMPUTE_ADC
     ) {
       const httpOptions = { headers: baseHeaders };
       return new LoggingContentGenerator(
         await createCodeAssistContentGenerator(
           httpOptions,
-          config.authType,
+          normalizedConfigAuthType,
           gcConfig,
           sessionId,
         ),
@@ -242,8 +380,8 @@ export async function createContentGenerator(
     }
 
     if (
-      config.authType === AuthType.USE_GEMINI ||
-      config.authType === AuthType.USE_VERTEX_AI
+      normalizedConfigAuthType === AuthType.USE_GEMINI ||
+      normalizedConfigAuthType === AuthType.USE_VERTEX_AI
     ) {
       let headers: Record<string, string> = { ...baseHeaders };
       if (gcConfig?.getUsageStatisticsEnabled()) {
@@ -265,12 +403,11 @@ export async function createContentGenerator(
       return new LoggingContentGenerator(googleGenAI.models, gcConfig);
     }
 
-    if (config.authType === AuthType.OPENAI_COMPATIBLE) {
-      const provider = new DefaultOpenAICompatibleProvider(config, gcConfig);
-      return new OpenAIContentGenerator(config, gcConfig, provider);
+    if (isOpenAIAuthType(normalizedConfigAuthType)) {
+      return createOpenAIContentGenerator(config, gcConfig);
     }
 
-    if (config.authType === AuthType.ANTHROPIC_COMPATIBLE) {
+    if (isAnthropicAuthType(normalizedConfigAuthType)) {
       const provider = createAnthropicCompatibleProvider(config, gcConfig);
       return new AnthropicContentGenerator(config, gcConfig, provider);
     }

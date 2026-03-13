@@ -28,12 +28,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 export class AnthropicContentGenerator implements ContentGenerator {
   protected pipeline: ContentGenerationPipeline;
+  private readonly provider: AnthropicCompatibleProvider;
 
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
     cliConfig: Config,
     provider: AnthropicCompatibleProvider,
   ) {
+    this.provider = provider;
     const pipelineConfig: PipelineConfig = {
       cliConfig,
       provider,
@@ -62,6 +64,9 @@ export class AnthropicContentGenerator implements ContentGenerator {
   async countTokens(
     request: CountTokensParameters,
   ): Promise<CountTokensResponse> {
+    await this.provider.validateGeminiRequest?.(
+      request as GenerateContentParameters,
+    );
     // Convert Gemini request to Anthropic format for token counting
     const anthropicRequest =
       await this.convertToAnthropicTokenCountRequest(request);

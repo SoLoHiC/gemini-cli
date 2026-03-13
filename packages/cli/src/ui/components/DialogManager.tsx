@@ -37,6 +37,7 @@ import { IdeTrustChangeDialog } from './IdeTrustChangeDialog.js';
 import { NewAgentsNotification } from './NewAgentsNotification.js';
 import { AgentConfigDialog } from './AgentConfigDialog.js';
 import { PolicyUpdateDialog } from './PolicyUpdateDialog.js';
+import { normalizeAuthType } from '@google/gemini-cli-core';
 
 interface DialogManagerProps {
   addItem: UseHistoryManagerReturn['addItem'];
@@ -293,6 +294,7 @@ export const DialogManager = ({
       <Box flexDirection="column">
         <ApiAuthDialog
           key={uiState.apiKeyDefaultValue}
+          authType={normalizeAuthType(settings.merged.security.auth.selectedType)}
           onSubmit={uiActions.handleApiKeySubmit}
           onCancel={uiActions.handleApiKeyCancel}
           error={uiState.authError}

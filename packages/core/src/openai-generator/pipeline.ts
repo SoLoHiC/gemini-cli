@@ -255,11 +255,13 @@ export class ContentGenerationPipeline {
     streaming: boolean = false,
   ): Promise<OpenAI.Chat.ChatCompletionCreateParams> {
     const messages = this.converter.convertGeminiRequestToOpenAI(request);
+    const requestConfig = this.buildGenerateContentConfig(request);
 
     // Apply provider-specific enhancements
     const baseRequest: OpenAI.Chat.ChatCompletionCreateParams = {
       model: this.contentGeneratorConfig.model || '',
       messages,
+      ...requestConfig,
     };
 
     // Add streaming options if present
@@ -279,6 +281,62 @@ export class ContentGenerationPipeline {
 
     // Let provider enhance the request (e.g., add metadata, cache control)
     return this.config.provider.buildRequest(baseRequest, userPromptId);
+  }
+
+  private buildGenerateContentConfig(
+    request: GenerateContentParameters,
+  ): Partial<OpenAI.Chat.ChatCompletionCreateParams> {
+    const samplingParams = this.contentGeneratorConfig.samplingParams;
+    const getValue = <T>(
+      configValue: T | undefined,
+      requestValue: T | undefined,
+    ): T | undefined => {
+      if (configValue !== undefined) {
+        return configValue;
+      }
+      return requestValue;
+    };
+
+    const generatedConfig: Partial<OpenAI.Chat.ChatCompletionCreateParams> = {};
+    const temperature = getValue(
+      samplingParams?.temperature,
+      request.config?.temperature,
+    );
+    const topP = getValue(samplingParams?.top_p, request.config?.topP);
+    const presencePenalty = getValue(
+      samplingParams?.presence_penalty,
+      request.config?.presencePenalty,
+    );
+    const frequencyPenalty = getValue(
+      samplingParams?.frequency_penalty,
+      request.config?.frequencyPenalty,
+    );
+    const maxTokens = getValue(
+      samplingParams?.max_tokens,
+      request.config?.maxOutputTokens,
+    );
+    const stop = request.config?.stopSequences;
+
+    if (temperature !== undefined) {
+      generatedConfig.temperature = temperature;
+    }
+    if (topP !== undefined) {
+      generatedConfig.top_p = topP;
+    }
+    if (presencePenalty !== undefined) {
+      generatedConfig.presence_penalty = presencePenalty;
+    }
+    if (frequencyPenalty !== undefined) {
+      generatedConfig.frequency_penalty = frequencyPenalty;
+    }
+    if (maxTokens !== undefined) {
+      generatedConfig.max_tokens = maxTokens;
+    }
+    if (stop && stop.length > 0) {
+      generatedConfig.stop = stop;
+    }
+
+    return generatedConfig;
   }
 
   /**

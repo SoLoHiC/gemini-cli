@@ -24,12 +24,14 @@ import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
 
 export class OpenAIContentGenerator implements ContentGenerator {
   protected pipeline: ContentGenerationPipeline;
+  private readonly contentGeneratorConfig: ContentGeneratorConfig;
 
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
     cliConfig: Config,
     provider: OpenAICompatibleProvider,
   ) {
+    this.contentGeneratorConfig = contentGeneratorConfig;
     // Create pipeline configuration
     const pipelineConfig: PipelineConfig = {
       cliConfig,
@@ -138,7 +140,9 @@ export class OpenAIContentGenerator implements ContentGenerator {
 
     try {
       const embedding = await this.pipeline.client.embeddings.create({
-        model: 'text-embedding-ada-002', // Default embedding model
+        model:
+          this.contentGeneratorConfig.embeddingModel ||
+          'text-embedding-3-small',
         input: text,
       });
 

@@ -39,6 +39,7 @@ export class ContentGenerationPipeline {
     request: GenerateContentParameters,
     userPromptId: string,
   ): Promise<GenerateContentResponse> {
+    await this.config.provider.validateGeminiRequest?.(request);
     const anthropicRequest =
       await this.converter.convertGeminiRequestToAnthropic(request);
     const processedRequest = this.config.provider.buildRequest(
@@ -57,6 +58,7 @@ export class ContentGenerationPipeline {
     userPromptId: string,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
     this.converter.resetStreamingToolCalls();
+    await this.config.provider.validateGeminiRequest?.(request);
     const anthropicRequest =
       await this.converter.convertGeminiRequestToAnthropic(request);
     const processedRequest = this.config.provider.buildRequest(
