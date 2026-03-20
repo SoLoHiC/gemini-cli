@@ -180,7 +180,7 @@ export class GeminiAgent {
       authMethods,
       agentInfo: {
         name: 'gemini-cli',
-        title: 'Gemini CLI',
+        title: 'Pisces CLI',
         version,
       },
       agentCapabilities: {

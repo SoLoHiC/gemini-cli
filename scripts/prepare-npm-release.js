@@ -46,7 +46,8 @@ const cliPkg = readJson(cliPkgPath);
 
 cliPkg.files = ['bundle/'];
 cliPkg.bin = {
-  gemini: 'bundle/gemini.js',
+  pisces: 'bundle/pisces.js',
+  gemini: 'bundle/pisces.js',
 };
 
 delete cliPkg.dependencies;

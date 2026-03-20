@@ -309,7 +309,7 @@ runs:
         rm -rf test-bundle
 
         gh release create "${INPUTS_RELEASE_TAG}" \
-          gemini-cli-bundle.zip \
+          bundle/pisces.js \
           --target "${STEPS_RELEASE_BRANCH_OUTPUTS_BRANCH_NAME}" \
           --title "Release ${INPUTS_RELEASE_TAG}" \
           --notes-start-tag "${INPUTS_PREVIOUS_TAG}" \

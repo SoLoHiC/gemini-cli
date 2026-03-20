@@ -118,10 +118,10 @@ jobs:
 
       - name: 'Verify Output Exists'
         run: |
-          if [ -f "dist/${{ matrix.platform_name }}/gemini" ]; then
-            echo "Binary found at dist/${{ matrix.platform_name }}/gemini"
-          elif [ -f "dist/${{ matrix.platform_name }}/gemini.exe" ]; then
-            echo "Binary found at dist/${{ matrix.platform_name }}/gemini.exe"
+          if [ -f "dist/${{ matrix.platform_name }}/pisces" ]; then
+            echo "Binary found at dist/${{ matrix.platform_name }}/pisces"
+          elif [ -f "dist/${{ matrix.platform_name }}/pisces.exe" ]; then
+            echo "Binary found at dist/${{ matrix.platform_name }}/pisces.exe"
           else
             echo "Error: Binary not found in dist/${{ matrix.platform_name }}/"
             ls -R dist/
@@ -131,10 +131,10 @@ jobs:
       - name: 'Smoke Test Binary'
         run: |
           echo "Running binary smoke test..."
-          if [ -f "dist/${{ matrix.platform_name }}/gemini.exe" ]; then
-            "./dist/${{ matrix.platform_name }}/gemini.exe" --version
+          if [ -f "dist/${{ matrix.platform_name }}/pisces.exe" ]; then
+            "./dist/${{ matrix.platform_name }}/pisces.exe" --version
           else
-            "./dist/${{ matrix.platform_name }}/gemini" --version
+            "./dist/${{ matrix.platform_name }}/pisces" --version
           fi
 
       - name: 'Run Integration Tests'
@@ -144,9 +144,9 @@ jobs:
         run: |
           echo "Running integration tests with binary..."
           if [[ "${{ matrix.os }}" == 'windows-latest' ]]; then
-            BINARY_PATH="$(cygpath -m "$(pwd)/dist/${{ matrix.platform_name }}/gemini.exe")"
+            BINARY_PATH="$(cygpath -m "$(pwd)/dist/${{ matrix.platform_name }}/pisces.exe")"
           else
-            BINARY_PATH="$(pwd)/dist/${{ matrix.platform_name }}/gemini"
+            BINARY_PATH="$(pwd)/dist/${{ matrix.platform_name }}/pisces"
           fi
           echo "Using binary at $BINARY_PATH"
           export INTEGRATION_TEST_GEMINI_BINARY_PATH="$BINARY_PATH"

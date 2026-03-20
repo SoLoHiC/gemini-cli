@@ -720,7 +720,7 @@ export async function main() {
 
     if (!input) {
       debugLogger.error(
-        `No input provided via stdin. Input can be provided by piping data into gemini or using the --prompt option.`,
+        `No input provided via stdin. Input can be provided by piping data into pisces or using the --prompt option.`,
       );
       await runExitCleanup();
       process.exit(ExitCodes.FATAL_INPUT_ERROR);

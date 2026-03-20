@@ -192,7 +192,7 @@ jobs:
         run: 'npm run bundle'
 
       - name: 'Smoke test bundle'
-        run: 'node ./bundle/gemini.js --version'
+        run: 'node ./bundle/pisces.js --version'
 
       - name: 'Smoke test npx installation'
         run: |
@@ -204,8 +204,9 @@ jobs:
           mv "$TARBALL" ../smoke-test-dir/
           cd ../smoke-test-dir
 
-          # 3. Run npx from the tarball
-          npx "./$TARBALL" --version
+          # 3. Run both entrypoints from the tarball
+          npx --yes --package "./$TARBALL" pisces --version
+          npx --yes --package "./$TARBALL" gemini --version
 
       - name: 'Wait for file system sync'
         run: 'sleep 2'
@@ -280,7 +281,7 @@ jobs:
         run: 'npm run bundle'
 
       - name: 'Smoke test bundle'
-        run: 'node ./bundle/gemini.js --version'
+        run: 'node ./bundle/pisces.js --version'
 
       - name: 'Smoke test npx installation'
         run: |
@@ -451,7 +452,7 @@ jobs:
         shell: 'pwsh'
 
       - name: 'Smoke test bundle'
-        run: 'node ./bundle/gemini.js --version'
+        run: 'node ./bundle/pisces.js --version'
         shell: 'pwsh'
 
       - name: 'Smoke test npx installation'

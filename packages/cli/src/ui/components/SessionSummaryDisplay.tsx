@@ -24,7 +24,7 @@ export const SessionSummaryDisplay: React.FC<SessionSummaryDisplayProps> = ({
   const worktreeSettings = config.getWorktreeSettings();
 
   const escapedSessionId = escapeShellArg(stats.sessionId, shell);
-  let footer = `To resume this session: gemini --resume ${escapedSessionId}`;
+  let footer = `To resume this session: pisces --resume ${escapedSessionId}`;
 
   if (worktreeSettings) {
     footer =

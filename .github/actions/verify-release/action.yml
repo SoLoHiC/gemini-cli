@@ -63,9 +63,15 @@ runs:
       shell: 'bash'
       working-directory: '${{ inputs.working-directory }}'
       run: |-
+        pisces_version=$(pisces --version)
+        if [ "$pisces_version" != "${INPUTS_EXPECTED_VERSION}" ]; then
+          echo "❌ NPM Version mismatch: Got $pisces_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
+          exit 1
+        fi
+
         gemini_version=$(gemini --version)
         if [ "$gemini_version" != "${INPUTS_EXPECTED_VERSION}" ]; then
-          echo "❌ NPM Version mismatch: Got $gemini_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
+          echo "❌ Gemini compatibility mismatch: Got $gemini_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
           exit 1
         fi
       env:
@@ -80,9 +86,15 @@ runs:
       shell: 'bash'
       working-directory: '${{ inputs.working-directory }}'
       run: |-
-        gemini_version=$(npx --prefer-online "${INPUTS_NPM_PACKAGE}" --version)
+        pisces_version=$(npx --prefer-online --package "${INPUTS_NPM_PACKAGE}" pisces --version)
+        if [ "$pisces_version" != "${INPUTS_EXPECTED_VERSION}" ]; then
+          echo "❌ NPX Pisces run mismatch: Got $pisces_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
+          exit 1
+        fi
+
+        gemini_version=$(npx --prefer-online --package "${INPUTS_NPM_PACKAGE}" gemini --version)
         if [ "$gemini_version" != "${INPUTS_EXPECTED_VERSION}" ]; then
-          echo "❌ NPX Run Version mismatch: Got $gemini_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
+          echo "❌ NPX Gemini compatibility mismatch: Got $gemini_version from ${INPUTS_NPM_PACKAGE}, expected ${INPUTS_EXPECTED_VERSION}"
           exit 1
         fi
       env:
