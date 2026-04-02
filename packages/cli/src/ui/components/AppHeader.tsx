@@ -7,6 +7,7 @@
 import { Box, Text } from 'ink';
 import { UserIdentity } from './UserIdentity.js';
 import { Tips } from './Tips.js';
+import { Header } from './Header.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 import { useConfig } from '../contexts/ConfigContext.js';
 import { useUIState } from '../contexts/UIStateContext.js';
@@ -73,6 +74,8 @@ export const AppHeader = ({ version, showDetails = true }: AppHeaderProps) => {
 
   const authType = config.getContentGeneratorConfig()?.authType;
   const loggedOut = isConfigInitialized && !isAuthenticating && !authType;
+  const headerStyle = settings.merged.ui.headerStyle ?? 'compact';
+  const useAsciiHeader = headerStyle === 'ascii';
 
   const showHeader = !(
     settings.merged.ui.hideBanner || config.getScreenReader()
@@ -93,6 +96,17 @@ export const AppHeader = ({ version, showDetails = true }: AppHeaderProps) => {
   // If the terminal is too narrow to fit the icon and metadata (especially long nightly versions)
   // side-by-side, we switch to column mode to prevent wrapping.
   const isNarrow = terminalWidth < NARROW_TERMINAL_BREAKPOINT;
+
+  const renderAsciiHeader = () => (
+    <Box flexDirection="column" marginTop={1} marginBottom={1} paddingLeft={2}>
+      <Header version={version} nightly={false} />
+      {showDetails && (
+        <Box marginTop={1} paddingLeft={2}>
+          {renderMetadata(true)}
+        </Box>
+      )}
+    </Box>
+  );
 
   const renderLogo = () => (
     <Box flexDirection="row">
@@ -142,21 +156,24 @@ export const AppHeader = ({ version, showDetails = true }: AppHeaderProps) => {
 
   return (
     <Box flexDirection="column">
-      {showHeader && (
-        <Box
-          flexDirection={useColumnLayout ? 'column' : 'row'}
-          marginTop={1}
-          marginBottom={1}
-          paddingLeft={1}
-        >
-          {renderLogo()}
-          {useColumnLayout ? (
-            <Box marginTop={1}>{renderMetadata(true)}</Box>
-          ) : (
-            renderMetadata(false)
-          )}
-        </Box>
-      )}
+      {showHeader &&
+        (useAsciiHeader ? (
+          renderAsciiHeader()
+        ) : (
+          <Box
+            flexDirection={useColumnLayout ? 'column' : 'row'}
+            marginTop={1}
+            marginBottom={1}
+            paddingLeft={1}
+          >
+            {renderLogo()}
+            {useColumnLayout ? (
+              <Box marginTop={1}>{renderMetadata(true)}</Box>
+            ) : (
+              renderMetadata(false)
+            )}
+          </Box>
+        ))}
 
       {bannerVisible && bannerText && (
         <Banner

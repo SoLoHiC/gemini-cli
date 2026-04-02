@@ -9,11 +9,13 @@ import {
   persistentStateMock,
 } from '../../test-utils/render.js';
 import type { LoadedSettings } from '../../config/settings.js';
+import { createMockSettings } from '../../test-utils/settings.js';
 import { AppHeader } from './AppHeader.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { makeFakeConfig } from '@google/gemini-cli-core';
 import crypto from 'node:crypto';
 import { _clearSessionBannersForTest } from '../hooks/useBanner.js';
+import * as useTerminalSize from '../hooks/useTerminalSize.js';
 
 vi.mock('../utils/terminalSetup.js', () => ({
   getTerminalProgram: () => null,
@@ -268,6 +270,37 @@ describe('<AppHeader />', () => {
     // Check for block characters from the logo
     expect(lastFrame()).toContain('▗█▀▀▜▙');
     expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('should render the full ASCII logo when ui.headerStyle is ascii', async () => {
+    const terminalSizeSpy = vi
+      .spyOn(useTerminalSize, 'useTerminalSize')
+      .mockReturnValue({
+        columns: 120,
+        rows: 20,
+      });
+
+    const { lastFrame, waitUntilReady, unmount } = await renderWithProviders(
+      <AppHeader version="1.0.0" />,
+      {
+        settings: createMockSettings({
+          ui: { headerStyle: 'ascii', showUserIdentity: false, hideTips: true },
+        }),
+        uiState: {
+          bannerData: {
+            defaultText: '',
+            warningText: '',
+          },
+          bannerVisible: false,
+        },
+      },
+    );
+    await waitUntilReady();
+
+    expect(lastFrame()).toContain('███████████  █████  █████████');
+    expect(lastFrame()).not.toContain('▗█▀▀▜▙');
+    terminalSizeSpy.mockRestore();
     unmount();
   });
 

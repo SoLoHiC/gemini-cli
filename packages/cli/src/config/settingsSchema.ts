@@ -627,6 +627,20 @@ const SETTINGS_SCHEMA = {
         description: 'Hide the application banner',
         showInDialog: true,
       },
+      headerStyle: {
+        type: 'enum',
+        label: 'Header Style',
+        category: 'UI',
+        requiresRestart: false,
+        default: 'compact',
+        description:
+          'Choose between the compact header and the full ASCII logo header.',
+        showInDialog: true,
+        options: [
+          { value: 'compact', label: 'Compact' },
+          { value: 'ascii', label: 'ASCII Logo' },
+        ],
+      },
       hideContextSummary: {
         type: 'boolean',
         label: 'Hide Context Summary',

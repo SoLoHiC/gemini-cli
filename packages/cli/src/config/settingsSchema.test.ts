@@ -104,6 +104,18 @@ describe('SettingsSchema', () => {
       expect(definition?.options?.map((o) => o.value)).toEqual(['low', 'full']);
     });
 
+    it('should have headerStyle enum property', () => {
+      const definition = getSettingsSchema().ui?.properties?.headerStyle;
+      expect(definition).toBeDefined();
+      expect(definition?.type).toBe('enum');
+      expect(definition?.default).toBe('compact');
+      expect(definition?.options?.map((o) => o.value)).toEqual([
+        'compact',
+        'ascii',
+      ]);
+      expect(definition?.showInDialog).toBe(true);
+    });
+
     it('should have checkpointing nested properties', () => {
       expect(
         getSettingsSchema().general?.properties?.checkpointing.properties
@@ -269,6 +281,7 @@ describe('SettingsSchema', () => {
       // This test ensures that the Settings type is properly inferred from the schema
       const settings: Settings = {
         ui: {
+          headerStyle: 'ascii',
           theme: 'dark',
         },
         context: {
@@ -278,6 +291,7 @@ describe('SettingsSchema', () => {
       };
 
       // TypeScript should not complain about these properties
+      expect(settings.ui?.headerStyle).toBe('ascii');
       expect(settings.ui?.theme).toBe('dark');
       expect(settings.context?.includeDirectories).toEqual(['/path/to/dir']);
       expect(settings.context?.loadMemoryFromIncludeDirectories).toBe(true);
