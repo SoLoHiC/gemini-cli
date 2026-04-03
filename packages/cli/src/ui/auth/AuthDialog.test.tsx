@@ -270,6 +270,38 @@ describe('AuthDialog', () => {
       unmount();
     });
 
+    it.each([AuthType.USE_OPENAI, AuthType.USE_ANTHROPIC])(
+      'always shows API key dialog for %s so env or stored keys can be prefilled',
+      async (authType) => {
+        mockedValidateAuthMethod.mockReturnValue(null);
+        const providerKey =
+          authType === AuthType.USE_OPENAI ? 'openai' : 'anthropic';
+        props.settings.merged.model = {
+          name: 'test-model',
+          maxSessionTurns: -1,
+          summarizeToolOutput: undefined,
+          compressionThreshold: 0.5,
+          disableLoopDetection: false,
+          skipNextSpeakerCheck: true,
+        };
+        props.settings.merged.modelProviders = {
+          [providerKey]: [{ id: 'test-model' }],
+        };
+        const { unmount } = await renderWithProviders(
+          <AuthDialog {...props} />,
+        );
+        const { onSelect: handleAuthSelect } =
+          mockedRadioButtonSelect.mock.calls[0][0];
+
+        await handleAuthSelect(authType);
+
+        expect(props.setAuthState).toHaveBeenCalledWith(
+          AuthState.AwaitingApiKeyInput,
+        );
+        unmount();
+      },
+    );
+
     it('always shows API key dialog even when env var is empty string', async () => {
       mockedValidateAuthMethod.mockReturnValue(null);
       vi.stubEnv('GEMINI_API_KEY', ''); // Empty string

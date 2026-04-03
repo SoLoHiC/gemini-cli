@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { type ContentGeneratorConfig } from '../core/contentGenerator.js';
+import type {
+  ContentGenerator,
+  type ContentGeneratorConfig,
+} from '../core/contentGenerator.js';
 import type { Config } from '../config/config.js';
 import { OpenAIContentGenerator } from './openaiContentGenerator.js';
-import type { ContentGenerator } from '../core/contentGenerator.js';
 import {
   DeepSeekOpenAICompatibleProvider,
   OpenRouterOpenAICompatibleProvider,
   type OpenAICompatibleProvider,
   DefaultOpenAICompatibleProvider,
+  DashScopeOpenAICompatibleProvider,
 } from './provider/index.js';
 
 export { OpenAIContentGenerator } from './openaiContentGenerator.js';
@@ -53,6 +56,13 @@ export function determineProvider(
 
   if (DeepSeekOpenAICompatibleProvider.isDeepSeekProvider(config)) {
     return new DeepSeekOpenAICompatibleProvider(
+      contentGeneratorConfig,
+      cliConfig,
+    );
+  }
+
+  if (DashScopeOpenAICompatibleProvider.isDashScopeProvider(config)) {
+    return new DashScopeOpenAICompatibleProvider(
       contentGeneratorConfig,
       cliConfig,
     );

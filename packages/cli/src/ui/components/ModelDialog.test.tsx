@@ -10,6 +10,7 @@ import { ModelDialog } from './ModelDialog.js';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { waitFor } from '../../test-utils/async.js';
 import { createMockSettings } from '../../test-utils/settings.js';
+import { SettingScope } from '../../config/settings.js';
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_GEMINI_MODEL_AUTO,
@@ -21,6 +22,7 @@ import {
   PREVIEW_GEMINI_FLASH_MODEL,
   PREVIEW_GEMINI_3_1_FLASH_LITE_MODEL,
   AuthType,
+  UserTierId,
 } from '@google/gemini-cli-core';
 import type { Config, ModelSlashCommandEvent } from '@google/gemini-cli-core';
 
@@ -55,6 +57,10 @@ describe('<ModelDialog />', () => {
   const mockGetGemini31FlashLiteLaunchedSync = vi.fn();
   const mockGetProModelNoAccess = vi.fn();
   const mockGetProModelNoAccessSync = vi.fn();
+  const mockGetUserTier = vi.fn();
+  const mockRefreshAuth = vi.fn();
+  const mockSetProviderApiKey = vi.fn();
+  const mockSetProviderBaseUrl = vi.fn();
 
   interface MockConfig extends Partial<Config> {
     setModel: (model: string, isTemporary?: boolean) => void;
@@ -74,6 +80,14 @@ describe('<ModelDialog />', () => {
           }>;
         }
       | undefined;
+    getUserTier: () => UserTierId | undefined;
+    refreshAuth: (
+      authType: AuthType,
+      apiKey?: string,
+      baseUrl?: string,
+    ) => Promise<void>;
+    setProviderApiKey: (apiKey: string | undefined) => void;
+    setProviderBaseUrl: (baseUrl: string | undefined) => void;
   }
 
   const mockConfig: MockConfig = {
@@ -87,6 +101,10 @@ describe('<ModelDialog />', () => {
     getProModelNoAccessSync: mockGetProModelNoAccessSync,
     getLastRetrievedQuota: () => ({ buckets: [] }),
     getSessionId: () => 'test-session-id',
+    getUserTier: mockGetUserTier,
+    refreshAuth: mockRefreshAuth,
+    setProviderApiKey: mockSetProviderApiKey,
+    setProviderBaseUrl: mockSetProviderBaseUrl,
   };
 
   beforeEach(() => {
@@ -97,6 +115,8 @@ describe('<ModelDialog />', () => {
     mockGetGemini31FlashLiteLaunchedSync.mockReturnValue(false);
     mockGetProModelNoAccess.mockResolvedValue(false);
     mockGetProModelNoAccessSync.mockReturnValue(false);
+    mockGetUserTier.mockReturnValue(UserTierId.STANDARD);
+    mockRefreshAuth.mockResolvedValue(undefined);
 
     // Default implementation for getDisplayString
     mockGetDisplayString.mockImplementation((val: string) => {
@@ -109,6 +129,7 @@ describe('<ModelDialog />', () => {
   const renderComponent = async (
     configValue = mockConfig as Config,
     authType = AuthType.LOGIN_WITH_GOOGLE,
+    settingsOverrides = {},
   ) => {
     const settings = createMockSettings({
       security: {
@@ -116,6 +137,7 @@ describe('<ModelDialog />', () => {
           selectedType: authType,
         },
       },
+      ...settingsOverrides,
     });
 
     const result = await renderWithProviders(
@@ -125,7 +147,7 @@ describe('<ModelDialog />', () => {
         settings,
       },
     );
-    return result;
+    return { ...result, settings };
   };
 
   it('renders the initial "main" view correctly', async () => {
@@ -295,6 +317,128 @@ describe('<ModelDialog />', () => {
       );
       expect(mockOnClose).toHaveBeenCalled();
     });
+    unmount();
+  });
+
+  it('syncs provider API key and base URL when remembering an OpenAI-compatible model', async () => {
+    vi.stubEnv('QWEN_API_KEY', 'qwen-from-env');
+    const { stdin, waitUntilReady, unmount, settings } = await renderComponent(
+      mockConfig as Config,
+      AuthType.LOGIN_WITH_GOOGLE,
+      {
+        modelProviders: {
+          openai: [
+            {
+              id: 'qwen3.6-plus',
+              name: 'Qwen',
+              envKey: 'QWEN_API_KEY',
+              baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            },
+          ],
+        },
+      },
+    );
+    const setValueSpy = vi.spyOn(settings, 'setValue');
+
+    await act(async () => {
+      stdin.write('\t');
+    });
+    await waitUntilReady();
+
+    await act(async () => {
+      stdin.write('\u001B[B');
+      stdin.write('\u001B[B');
+    });
+    await waitUntilReady();
+
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+
+    await waitFor(() => {
+      expect(setValueSpy).toHaveBeenCalledWith(
+        SettingScope.User,
+        'security.auth.selectedType',
+        AuthType.USE_OPENAI,
+      );
+      expect(setValueSpy).toHaveBeenCalledWith(
+        SettingScope.User,
+        'security.auth.apiKey',
+        'qwen-from-env',
+      );
+      expect(setValueSpy).toHaveBeenCalledWith(
+        SettingScope.User,
+        'security.auth.baseUrl',
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      );
+      expect(mockSetProviderApiKey).toHaveBeenCalledWith('qwen-from-env');
+      expect(mockSetProviderBaseUrl).toHaveBeenCalledWith(
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      );
+      expect(mockSetModel).toHaveBeenCalledWith('qwen3.6-plus', false);
+      expect(mockRefreshAuth).toHaveBeenCalledWith(
+        AuthType.USE_OPENAI,
+        'qwen-from-env',
+        'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      );
+    });
+
+    vi.unstubAllEnvs();
+    unmount();
+  });
+
+  it('does not persist provider API key when remembering model is off', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'openai-from-env');
+    const { stdin, waitUntilReady, unmount, settings } = await renderComponent(
+      mockConfig as Config,
+      AuthType.LOGIN_WITH_GOOGLE,
+      {
+        modelProviders: {
+          openai: [
+            {
+              id: 'gpt-4.1',
+              name: 'GPT-4.1',
+            },
+          ],
+        },
+      },
+    );
+    const setValueSpy = vi.spyOn(settings, 'setValue');
+
+    await act(async () => {
+      stdin.write('\u001B[B');
+      stdin.write('\u001B[B');
+    });
+    await waitUntilReady();
+
+    await act(async () => {
+      stdin.write('\r');
+    });
+    await waitUntilReady();
+
+    await waitFor(() => {
+      expect(setValueSpy).toHaveBeenCalledWith(
+        SettingScope.User,
+        'security.auth.selectedType',
+        AuthType.USE_OPENAI,
+      );
+      expect(setValueSpy).not.toHaveBeenCalledWith(
+        SettingScope.User,
+        'security.auth.apiKey',
+        expect.anything(),
+      );
+      expect(mockSetProviderApiKey).toHaveBeenCalledWith('openai-from-env');
+      expect(mockSetProviderBaseUrl).toHaveBeenCalledWith(undefined);
+      expect(mockRefreshAuth).toHaveBeenCalledWith(
+        AuthType.USE_OPENAI,
+        'openai-from-env',
+        undefined,
+      );
+      expect(mockSetModel).toHaveBeenCalledWith('gpt-4.1', true);
+    });
+
+    vi.unstubAllEnvs();
     unmount();
   });
 

@@ -94,10 +94,10 @@ export const useAuthCommand = (
         (entry) => entry.id === selectedModel,
       );
       const resolvedKey =
-        settings.merged.security.auth.apiKey ||
         (providerModel?.envKey
           ? process.env[providerModel.envKey]
           : undefined) ||
+        settings.merged.security.auth.apiKey ||
         process.env[defaultEnvKey] ||
         '';
       setApiKeyDefaultValue(resolvedKey);

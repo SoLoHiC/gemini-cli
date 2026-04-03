@@ -24,10 +24,7 @@ const UNSUPPORTED_CONTENT_TYPES = new Set([
   'container_upload',
 ]);
 
-function sanitizeToolResultContent(
-  value: unknown,
-  context: string,
-): unknown {
+function sanitizeToolResultContent(value: unknown, context: string): unknown {
   if (!Array.isArray(value)) {
     return value;
   }
@@ -49,10 +46,7 @@ function validateGeminiPart(part: Part): void {
   }
 }
 
-function sanitizeContentBlock(
-  block: unknown,
-  context: string,
-): unknown {
+function sanitizeContentBlock(block: unknown, context: string): unknown {
   if (typeof block !== 'object' || block === null || !('type' in block)) {
     return block;
   }
@@ -81,6 +75,31 @@ function sanitizeContentBlock(
   return typedBlock;
 }
 
+function isContentBlockParam(
+  block: unknown,
+): block is Anthropic.Messages.ContentBlockParam {
+  return typeof block === 'object' && block !== null && 'type' in block;
+}
+
+function sanitizeContentBlockToContentBlock(
+  block: unknown,
+  context: string,
+): Anthropic.Messages.ContentBlockParam {
+  const result = sanitizeContentBlock(block, context);
+  if (isContentBlockParam(result)) {
+    return result;
+  }
+  // Fallback for unexpected types
+  return { type: 'text', text: String(result) };
+}
+
+function toRecord(obj: unknown): Record<string, unknown> {
+  if (typeof obj !== 'object' || obj === null) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(obj));
+}
+
 export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompatibleProvider {
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
@@ -103,13 +122,17 @@ export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompati
       : [request.contents];
 
     for (const content of contents) {
-      if (typeof content !== 'object' || content === null || !('parts' in content)) {
+      if (
+        typeof content !== 'object' ||
+        content === null ||
+        !('parts' in content)
+      ) {
         continue;
       }
 
       for (const part of content.parts ?? []) {
         if (typeof part === 'object' && part !== null) {
-          validateGeminiPart(part as Part);
+          validateGeminiPart(part);
         }
       }
     }
@@ -147,60 +170,67 @@ export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompati
     request: Anthropic.Messages.MessageCreateParams,
     userPromptId: string,
   ): Anthropic.Messages.MessageCreateParams {
-    const baseRequest = super.buildRequest(request, userPromptId) as
-      & Anthropic.Messages.MessageCreateParams
-      & Record<string, unknown>;
+    const baseRequest = super.buildRequest(request, userPromptId);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    const extendedRequest = baseRequest as unknown as Record<string, unknown>;
 
-    if (
-      typeof baseRequest.model === 'string' &&
-      !baseRequest.model.startsWith('deepseek-')
-    ) {
+    const model = extendedRequest['model'];
+    if (typeof model === 'string' && !model.startsWith('deepseek-')) {
       debugLogger.warn(
-        `DeepSeek Anthropic endpoint is being used with non-DeepSeek model '${baseRequest.model}'. The request will be forwarded unchanged.`,
+        `DeepSeek Anthropic endpoint is being used with non-DeepSeek model '${model}'. The request will be forwarded unchanged.`,
       );
     }
 
-    if (baseRequest.temperature !== undefined) {
-      baseRequest.temperature = Math.max(
+    const temperature = extendedRequest['temperature'];
+    if (typeof temperature === 'number') {
+      extendedRequest['temperature'] = Math.max(
         0.0,
-        Math.min(2.0, baseRequest.temperature),
+        Math.min(2.0, temperature),
       );
     }
 
-    delete baseRequest['top_k'];
-    delete baseRequest['disable_parallel_tool_use'];
+    delete extendedRequest['top_k'];
+    delete extendedRequest['disable_parallel_tool_use'];
 
-    if (Array.isArray(baseRequest.messages)) {
-      baseRequest.messages = baseRequest.messages.map((message, messageIndex) => {
-        const sanitizedMessage = {
-          ...message,
-        } as Anthropic.Messages.MessageParam & Record<string, unknown>;
+    const messages = extendedRequest['messages'];
+    if (Array.isArray(messages)) {
+      const sanitizedMessages: unknown[] = messages.map(
+        (message: unknown, messageIndex: number) => {
+          const sanitizedMessage: Record<string, unknown> = {
+            ...toRecord(message),
+          };
 
-        delete sanitizedMessage['cache_control'];
+          delete sanitizedMessage['cache_control'];
 
-        if (Array.isArray(sanitizedMessage.content)) {
-          sanitizedMessage.content = sanitizedMessage.content.map((block, blockIndex) =>
-            sanitizeContentBlock(
-              block,
-              `messages[${messageIndex}].content[${blockIndex}]`,
-            ),
-          ) as Anthropic.Messages.ContentBlockParam[];
-        }
+          const content = sanitizedMessage['content'];
+          if (Array.isArray(content)) {
+            sanitizedMessage['content'] = content.map((block, blockIndex) =>
+              sanitizeContentBlockToContentBlock(
+                block,
+                `messages[${messageIndex}].content[${blockIndex}]`,
+              ),
+            );
+          }
 
-        return sanitizedMessage;
-      });
+          return sanitizedMessage;
+        },
+      );
+      extendedRequest['messages'] = sanitizedMessages;
     }
 
-    if (Array.isArray(baseRequest.tools)) {
-      baseRequest.tools = baseRequest.tools.map((tool) => {
-        const sanitizedTool = {
-          ...tool,
-        } as Anthropic.Messages.Tool & Record<string, unknown>;
+    const tools = extendedRequest['tools'];
+    if (Array.isArray(tools)) {
+      const sanitizedTools: unknown[] = tools.map((tool: unknown) => {
+        const sanitizedTool: Record<string, unknown> = {
+          ...toRecord(tool),
+        };
         delete sanitizedTool['cache_control'];
         return sanitizedTool;
       });
+      extendedRequest['tools'] = sanitizedTools;
     }
 
-    return baseRequest;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    return extendedRequest as unknown as Anthropic.Messages.MessageCreateParams;
   }
 }

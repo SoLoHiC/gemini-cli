@@ -7,8 +7,8 @@ exports[`AuthDialog > Snapshots > renders correctly with auth error 1`] = `
 │                                                                                                  │
 │  How would you like to authenticate for this project?                                            │
 │                                                                                                  │
-│  (selected) Login  (not selected) Use   (not selected)  (not selected)    (not selected)         │
-│  with Google       Gemini API Key       Vertex AI       OpenAI API Key    Anthropic API Key      │
+│  (selected) Sign in (not selected) Use   (not selected) (not selected)     (not selected)        │
+│  with Google        Gemini API Key       Vertex AI      OpenAI API Key     Anthropic API Key     │
 │                                                                                                  │
 │  Something went wrong                                                                            │
 │                                                                                                  │
@@ -29,8 +29,8 @@ exports[`AuthDialog > Snapshots > renders correctly with default props 1`] = `
 │                                                                                                  │
 │  How would you like to authenticate for this project?                                            │
 │                                                                                                  │
-│  (selected) Login  (not selected) Use   (not selected)  (not selected)    (not selected)         │
-│  with Google       Gemini API Key       Vertex AI       OpenAI API Key    Anthropic API Key      │
+│  (selected) Sign in (not selected) Use   (not selected) (not selected)     (not selected)        │
+│  with Google        Gemini API Key       Vertex AI      OpenAI API Key     Anthropic API Key     │
 │                                                                                                  │
 │  (Use Enter to select)                                                                           │
 │                                                                                                  │

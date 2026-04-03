@@ -253,11 +253,19 @@ function getProviderDefaults(authType: AuthType): ProviderDefaults {
 }
 
 function resolveProviderSubtype(authType: AuthType, baseUrl?: string): string {
-  const normalizedBaseUrl = (baseUrl || '').toLowerCase();
+  const normalizedBaseUrl = (baseUrl || '').toLowerCase().replace(/\/+$/, '');
 
   if (authType === AuthType.USE_OPENAI) {
     if (normalizedBaseUrl.includes('openrouter.ai')) {
       return 'openrouter';
+    }
+    if (
+      normalizedBaseUrl.includes('dashscope.aliyuncs.com/compatible-mode/v1') ||
+      normalizedBaseUrl.includes(
+        'dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      )
+    ) {
+      return 'dashscope-openai';
     }
     if (normalizedBaseUrl.includes('api.deepseek.com')) {
       return 'deepseek-openai';
@@ -302,10 +310,13 @@ export async function createContentGeneratorConfig(
     );
     const providerGenerationConfig = providerModelConfig?.generationConfig;
     const apiKeyEnvKey = providerModelConfig?.envKey ?? defaults.apiKeyEnvKey;
+    const providerEnvApiKey = apiKeyEnvKey
+      ? process.env[apiKeyEnvKey]
+      : undefined;
     const resolvedApiKey =
       apiKey ||
+      providerEnvApiKey ||
       config.getProviderApiKey() ||
-      (apiKeyEnvKey ? process.env[apiKeyEnvKey] : undefined) ||
       process.env[defaults.apiKeyEnvKey];
     const resolvedBaseUrl =
       baseUrl ||

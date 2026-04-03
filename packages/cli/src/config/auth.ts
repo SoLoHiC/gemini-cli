@@ -8,8 +8,92 @@ import {
   AuthType,
   isAnthropicAuthType,
   isOpenAIAuthType,
+  type ModelProviderConfig,
 } from '@google/gemini-cli-core';
-import { loadEnvironment, loadSettings } from './settings.js';
+import {
+  loadEnvironment,
+  loadSettings,
+  type MergedSettings,
+} from './settings.js';
+
+function getProviderConfigForModel(
+  settings: Pick<MergedSettings, 'modelProviders' | 'model'>,
+  authType: AuthType,
+  modelId?: string,
+): ModelProviderConfig | undefined {
+  const providerKey = isOpenAIAuthType(authType)
+    ? 'openai'
+    : isAnthropicAuthType(authType)
+      ? 'anthropic'
+      : undefined;
+
+  if (!providerKey) {
+    return undefined;
+  }
+
+  const targetModel = modelId ?? settings.model?.name;
+  if (!targetModel) {
+    return undefined;
+  }
+
+  return settings.modelProviders?.[providerKey]?.find(
+    (entry) => entry.id === targetModel,
+  );
+}
+
+function isOfficialProviderBaseUrl(
+  authType: AuthType,
+  baseUrl: string | undefined,
+): boolean {
+  if (!baseUrl) {
+    return true;
+  }
+
+  const normalizedBaseUrl = baseUrl.toLowerCase().replace(/\/+$/, '');
+  return isOpenAIAuthType(authType)
+    ? normalizedBaseUrl.includes('api.openai.com')
+    : normalizedBaseUrl.includes('api.anthropic.com');
+}
+
+export function resolveProviderApiKeyForModel(
+  settings: Pick<MergedSettings, 'modelProviders' | 'model' | 'security'>,
+  authType: AuthType,
+  modelId?: string,
+): string | undefined {
+  if (!isOpenAIAuthType(authType) && !isAnthropicAuthType(authType)) {
+    return undefined;
+  }
+
+  const providerConfig = getProviderConfigForModel(settings, authType, modelId);
+  const defaultEnvKey = isOpenAIAuthType(authType)
+    ? 'OPENAI_API_KEY'
+    : 'ANTHROPIC_API_KEY';
+
+  if (providerConfig?.envKey && process.env[providerConfig.envKey]) {
+    return process.env[providerConfig.envKey];
+  }
+
+  if (
+    isOfficialProviderBaseUrl(authType, providerConfig?.baseUrl) &&
+    process.env[defaultEnvKey]
+  ) {
+    return process.env[defaultEnvKey];
+  }
+
+  return settings.security.auth.apiKey;
+}
+
+export function resolveProviderBaseUrlForModel(
+  settings: Pick<MergedSettings, 'modelProviders' | 'model'>,
+  authType: AuthType,
+  modelId?: string,
+): string | undefined {
+  if (!isOpenAIAuthType(authType) && !isAnthropicAuthType(authType)) {
+    return undefined;
+  }
+
+  return getProviderConfigForModel(settings, authType, modelId)?.baseUrl;
+}
 
 export function parseAuthType(value: string | undefined): AuthType | undefined {
   return Object.values(AuthType).find((authType) => authType === value);

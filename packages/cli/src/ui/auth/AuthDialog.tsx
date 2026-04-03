@@ -211,7 +211,9 @@ export function AuthDialog({
           return;
         }
         if (isProviderAuthType(authType)) {
-          setAuthState(AuthState.Unauthenticated);
+          // Match Gemini API key flow: always open the API key dialog so the
+          // user can confirm the prefilled key from env/settings or enter a new one.
+          setAuthState(AuthState.AwaitingApiKeyInput);
           return;
         }
       }

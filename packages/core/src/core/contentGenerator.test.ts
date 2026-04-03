@@ -1038,7 +1038,31 @@ describe('createContentGeneratorConfig', () => {
     expect(config.providerSubtype).toBe('deepseek-openai');
   });
 
-  it('should prefer explicit providerApiKey and providerBaseUrl over modelProviders', async () => {
+  it('should prefer provider-specific envKey over generic providerApiKey', async () => {
+    vi.mocked(mockConfig.getModel).mockReturnValue('deepseek-chat');
+    vi.mocked(mockConfig.getProviderApiKey).mockReturnValue('settings-key');
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue({
+      openai: [
+        {
+          id: 'deepseek-chat',
+          envKey: 'DEEPSEEK_API_KEY',
+          baseUrl: 'https://api.deepseek.com',
+        },
+      ],
+    });
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-test-key');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('deepseek-test-key');
+    expect(config.baseUrl).toBe('https://api.deepseek.com');
+    expect(config.providerSubtype).toBe('deepseek-openai');
+  });
+
+  it('should prefer explicit apiKey argument and providerBaseUrl over modelProviders', async () => {
     vi.mocked(mockConfig.getModel).mockReturnValue('deepseek-chat');
     vi.mocked(mockConfig.getProviderApiKey).mockReturnValue('settings-key');
     vi.mocked(mockConfig.getProviderBaseUrl).mockReturnValue(
@@ -1058,10 +1082,37 @@ describe('createContentGeneratorConfig', () => {
     const config = await createContentGeneratorConfig(
       mockConfig,
       AuthType.USE_OPENAI,
+      'explicit-key',
     );
 
-    expect(config.apiKey).toBe('settings-key');
+    expect(config.apiKey).toBe('explicit-key');
     expect(config.baseUrl).toBe('https://proxy.example.com/v1');
     expect(config.providerSubtype).toBe('default-openai');
+  });
+
+  it('should configure DashScope provider auth from modelProviders envKey and baseUrl', async () => {
+    vi.mocked(mockConfig.getModel).mockReturnValue('qwen3-coder-plus');
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue({
+      openai: [
+        {
+          id: 'qwen3-coder-plus',
+          envKey: 'DASHSCOPE_API_KEY',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        },
+      ],
+    });
+    vi.stubEnv('DASHSCOPE_API_KEY', 'dashscope-test-key');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_OPENAI,
+    );
+
+    expect(config.apiKey).toBe('dashscope-test-key');
+    expect(config.apiKeyEnvKey).toBe('DASHSCOPE_API_KEY');
+    expect(config.baseUrl).toBe(
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    );
+    expect(config.providerSubtype).toBe('dashscope-openai');
   });
 });

@@ -12,7 +12,6 @@ import { DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES } from '../constants.js';
 import type {
   OpenAICompatibleProvider,
   DashScopeRequestMetadata,
-  ChatCompletionContentPartTextWithCache,
   ChatCompletionContentPartWithCache,
   ChatCompletionToolWithCache,
 } from './types.js';
@@ -34,7 +33,9 @@ export class DashScopeOpenAICompatibleProvider
   static isDashScopeProvider(
     contentGeneratorConfig: ContentGeneratorConfig,
   ): boolean {
-    const baseUrl = contentGeneratorConfig.baseUrl;
+    const baseUrl = (contentGeneratorConfig.baseUrl || '')
+      .toLowerCase()
+      .replace(/\/+$/, '');
     return (
       baseUrl === 'https://dashscope.aliyuncs.com/compatible-mode/v1' ||
       baseUrl === 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
@@ -93,14 +94,18 @@ export class DashScopeOpenAICompatibleProvider
     );
 
     if (this.isVisionModel(request.model)) {
-      return {
+      const visionRequest: OpenAI.Chat.ChatCompletionCreateParams & {
+        vl_high_resolution_images: true;
+      } = {
         ...requestWithTokenLimits,
         messages,
         ...(tools ? { tools } : {}),
         ...(this.buildMetadata(userPromptId) || {}),
-        /* @ts-expect-error dashscope exclusive */
+        // DashScope supports this provider-specific flag in compatible mode.
         vl_high_resolution_images: true,
-      } as OpenAI.Chat.ChatCompletionCreateParams;
+      };
+
+      return visionRequest;
     }
 
     return {
@@ -108,7 +113,7 @@ export class DashScopeOpenAICompatibleProvider
       messages,
       ...(tools ? { tools } : {}),
       ...(this.buildMetadata(userPromptId) || {}),
-    } as OpenAI.Chat.ChatCompletionCreateParams;
+    };
   }
 
   buildMetadata(userPromptId: string): DashScopeRequestMetadata {
@@ -149,6 +154,7 @@ export class DashScopeOpenAICompatibleProvider
 
               if (
                 !shouldAddCacheControl ||
+                message.role === 'function' ||
                 !('content' in message) ||
                 message.content === null ||
                 message.content === undefined
@@ -159,14 +165,14 @@ export class DashScopeOpenAICompatibleProvider
               return {
                 ...message,
                 content: this.addCacheControlToContent(message.content),
-              } as OpenAI.Chat.ChatCompletionMessageParam;
+              };
             },
           );
 
     const updatedTools =
       cacheControl === 'all' && request.tools?.length
         ? this.addCacheControlToTools(request.tools)
-        : (request.tools as ChatCompletionToolWithCache[] | undefined);
+        : request.tools;
 
     return {
       messages: updatedMessages,
@@ -178,10 +184,10 @@ export class DashScopeOpenAICompatibleProvider
     tools: OpenAI.Chat.ChatCompletionTool[],
   ): ChatCompletionToolWithCache[] {
     if (tools.length === 0) {
-      return tools as ChatCompletionToolWithCache[];
+      return tools;
     }
 
-    const updatedTools = [...tools] as ChatCompletionToolWithCache[];
+    const updatedTools: ChatCompletionToolWithCache[] = [...tools];
     const lastToolIndex = tools.length - 1;
     updatedTools[lastToolIndex] = {
       ...updatedTools[lastToolIndex],
@@ -207,10 +213,10 @@ export class DashScopeOpenAICompatibleProvider
         {
           type: 'text',
           text: content,
-        } as ChatCompletionContentPartTextWithCache,
+        },
       ];
     }
-    return [...content] as ChatCompletionContentPartWithCache[];
+    return [...content];
   }
 
   private addCacheControlToContentArray(
@@ -222,7 +228,7 @@ export class DashScopeOpenAICompatibleProvider
           type: 'text',
           text: '',
           cache_control: { type: 'ephemeral' },
-        } as ChatCompletionContentPartTextWithCache,
+        },
       ];
     }
 
@@ -232,13 +238,13 @@ export class DashScopeOpenAICompatibleProvider
       contentArray[contentArray.length - 1] = {
         ...lastItem,
         cache_control: { type: 'ephemeral' },
-      } as ChatCompletionContentPartTextWithCache;
+      };
     } else {
       contentArray.push({
         type: 'text',
         text: '',
         cache_control: { type: 'ephemeral' },
-      } as ChatCompletionContentPartTextWithCache);
+      });
     }
 
     return contentArray;

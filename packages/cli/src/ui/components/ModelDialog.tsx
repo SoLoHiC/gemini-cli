@@ -36,7 +36,11 @@ import { DescriptiveRadioButtonSelect } from './shared/DescriptiveRadioButtonSel
 import { ConfigContext } from '../contexts/ConfigContext.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 import { SettingScope } from '../../config/settings.js';
-import { parseAuthType } from '../../config/auth.js';
+import {
+  parseAuthType,
+  resolveProviderApiKeyForModel,
+  resolveProviderBaseUrlForModel,
+} from '../../config/auth.js';
 
 interface ModelDialogProps {
   onClose: () => void;
@@ -303,6 +307,8 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
       description: string;
       key: string;
       authType: AuthType;
+      baseUrl?: string;
+      envKey?: string;
     }> = [];
 
     for (const entry of settings.merged.modelProviders?.openai ?? []) {
@@ -312,6 +318,8 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
         description: entry.description || 'Use this OpenAI-compatible model',
         key: `openai:${entry.id}`,
         authType: AuthType.USE_OPENAI,
+        baseUrl: entry.baseUrl,
+        envKey: entry.envKey,
       });
     }
 
@@ -324,6 +332,8 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
         description: entry.description || 'Use this Anthropic-compatible model',
         key: `anthropic:${entry.id}`,
         authType: AuthType.USE_ANTHROPIC,
+        baseUrl: entry.baseUrl,
+        envKey: entry.envKey,
       });
     }
 
@@ -367,10 +377,40 @@ export function ModelDialog({ onClose }: ModelDialogProps): React.JSX.Element {
             'security.auth.selectedType',
             providerOption.authType,
           );
+          const providerApiKey = resolveProviderApiKeyForModel(
+            settings.merged,
+            providerOption.authType,
+            model,
+          );
+          const providerBaseUrl = resolveProviderBaseUrlForModel(
+            settings.merged,
+            providerOption.authType,
+            model,
+          );
+          config.setProviderApiKey(providerApiKey);
+          config.setProviderBaseUrl(providerBaseUrl);
+          if (persistMode) {
+            settings.setValue(
+              SettingScope.User,
+              'security.auth.apiKey',
+              providerApiKey,
+            );
+            settings.setValue(
+              SettingScope.User,
+              'security.auth.baseUrl',
+              providerBaseUrl,
+            );
+          }
           config.setModel(model, persistMode ? false : true);
-          void config.refreshAuth(providerOption.authType).catch((error) => {
-            debugLogger.error('Failed to switch provider model:', error);
-          });
+          void config
+            .refreshAuth(
+              providerOption.authType,
+              providerApiKey,
+              providerBaseUrl,
+            )
+            .catch((error) => {
+              debugLogger.error('Failed to switch provider model:', error);
+            });
         } else {
           const selectedAuthType = parseAuthType(
             settings.merged.security.auth.selectedType,
