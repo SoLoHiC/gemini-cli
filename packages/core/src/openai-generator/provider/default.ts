@@ -63,19 +63,34 @@ export class DefaultOpenAICompatibleProvider
     } as OpenAI.Chat.ChatCompletionCreateParams & Record<string, unknown>;
     const samplingParams = this.contentGeneratorConfig.samplingParams;
 
-    if (samplingParams?.temperature !== undefined && mergedRequest.temperature === undefined) {
+    if (
+      samplingParams?.temperature !== undefined &&
+      mergedRequest.temperature === undefined
+    ) {
       mergedRequest.temperature = samplingParams.temperature;
     }
-    if (samplingParams?.top_p !== undefined && mergedRequest.top_p === undefined) {
+    if (
+      samplingParams?.top_p !== undefined &&
+      mergedRequest.top_p === undefined
+    ) {
       mergedRequest.top_p = samplingParams.top_p;
     }
-    if (samplingParams?.presence_penalty !== undefined && mergedRequest.presence_penalty === undefined) {
+    if (
+      samplingParams?.presence_penalty !== undefined &&
+      mergedRequest.presence_penalty === undefined
+    ) {
       mergedRequest.presence_penalty = samplingParams.presence_penalty;
     }
-    if (samplingParams?.frequency_penalty !== undefined && mergedRequest.frequency_penalty === undefined) {
+    if (
+      samplingParams?.frequency_penalty !== undefined &&
+      mergedRequest.frequency_penalty === undefined
+    ) {
       mergedRequest.frequency_penalty = samplingParams.frequency_penalty;
     }
-    if (samplingParams?.max_tokens !== undefined && mergedRequest.max_tokens === undefined) {
+    if (
+      samplingParams?.max_tokens !== undefined &&
+      mergedRequest.max_tokens === undefined
+    ) {
       mergedRequest.max_tokens = samplingParams.max_tokens;
     }
     if (
@@ -85,12 +100,20 @@ export class DefaultOpenAICompatibleProvider
       mergedRequest['reasoning'] = this.contentGeneratorConfig.reasoning;
     }
     if (
+      this.contentGeneratorConfig.reasoningEffort !== undefined &&
+      mergedRequest['reasoning_effort'] === undefined
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      mergedRequest['reasoning_effort'] = this.contentGeneratorConfig
+        .reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams['reasoning_effort'];
+    }
+    if (
       this.contentGeneratorConfig.modalities !== undefined &&
       mergedRequest['modalities'] === undefined
     ) {
-      mergedRequest['modalities'] = this.contentGeneratorConfig.modalities as Array<
-        'text' | 'audio'
-      >;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      mergedRequest['modalities'] = this.contentGeneratorConfig
+        .modalities as Array<'text' | 'audio'>;
     }
     if (
       this.contentGeneratorConfig.extra_body !== undefined &&

@@ -100,6 +100,19 @@ function toRecord(obj: unknown): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj));
 }
 
+function isThinkingDisabledInRequest(
+  request: Anthropic.Messages.MessageCreateParams,
+): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  const thinking = (request as unknown as Record<string, unknown>)['thinking'];
+  if (!thinking || typeof thinking !== 'object') {
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  return (thinking as Record<string, unknown>)['type'] === 'disabled';
+}
+
 export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompatibleProvider {
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
@@ -114,6 +127,14 @@ export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompati
     const baseUrl = contentGeneratorConfig.baseUrl ?? '';
 
     return baseUrl.toLowerCase().includes('api.deepseek.com');
+  }
+
+  static isDeepSeekModel(
+    contentGeneratorConfig: ContentGeneratorConfig,
+  ): boolean {
+    const model = contentGeneratorConfig.model ?? '';
+
+    return model.toLowerCase().startsWith('deepseek-');
   }
 
   validateGeminiRequest(request: GenerateContentParameters): void {
@@ -187,6 +208,24 @@ export class DeepSeekAnthropicCompatibleProvider extends DefaultAnthropicCompati
         0.0,
         Math.min(2.0, temperature),
       );
+    }
+
+    // Auto-inject output_config for DeepSeek V4 models (Anthropic format)
+    const modelStr = typeof model === 'string' ? model : '';
+    if (modelStr.toLowerCase().startsWith('deepseek-v4-')) {
+      if (extendedRequest['thinking'] === undefined) {
+        extendedRequest['thinking'] = { type: 'enabled' };
+      }
+
+      const isThinkingDisabled = isThinkingDisabledInRequest(
+        baseRequest as Anthropic.Messages.MessageCreateParams,
+      );
+      if (
+        !isThinkingDisabled &&
+        extendedRequest['output_config'] === undefined
+      ) {
+        extendedRequest['output_config'] = { effort: 'high' };
+      }
     }
 
     delete extendedRequest['top_k'];

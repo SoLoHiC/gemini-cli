@@ -594,6 +594,9 @@ export interface ProviderGenerationConfig {
   enableCacheControl?: boolean;
   samplingParams?: ContentGeneratorConfig['samplingParams'];
   reasoning?: Record<string, unknown>;
+  reasoningEffort?: string;
+  thinking?: Record<string, unknown>;
+  outputConfig?: Record<string, unknown>;
   schemaCompliance?: Record<string, unknown>;
   contextWindowSize?: number;
   customHeaders?: Record<string, string>;

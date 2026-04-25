@@ -60,8 +60,8 @@ describe('getModelTokenMetadata', () => {
     expect(getModelTokenMetadata('deepseek-chat')).toMatchObject({
       providerFamily: 'deepseek',
       modelFamily: 'deepseek',
-      inputTokenLimit: 131_072,
-      outputTokenLimit: 8_192,
+      inputTokenLimit: 1_048_576,
+      outputTokenLimit: 393_216,
       source: 'built-in',
     });
   });
@@ -125,7 +125,7 @@ describe('getModelTokenMetadata', () => {
     expect(getModelTokenMetadata('deepseek-chat', config)).toMatchObject({
       providerFamily: 'deepseek',
       inputTokenLimit: 262_144,
-      outputTokenLimit: 8_192,
+      outputTokenLimit: 393_216,
       source: 'config override',
     });
   });
@@ -176,7 +176,7 @@ describe('getModelTokenMetadata', () => {
     expect(getModelTokenMetadata('deepseek-chat', config)).toMatchObject({
       providerFamily: 'deepseek',
       inputTokenLimit: 196_608,
-      outputTokenLimit: 8_192,
+      outputTokenLimit: 393_216,
       source: 'config override',
     });
   });

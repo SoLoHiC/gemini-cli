@@ -25,6 +25,15 @@ export function createAnthropicCompatibleProvider(
     );
   }
 
+  // Also detect DeepSeek models by name to support third-party providers
+  // hosting DeepSeek V4 under their own base URL
+  if (DeepSeekAnthropicCompatibleProvider.isDeepSeekModel(config)) {
+    return new DeepSeekAnthropicCompatibleProvider(
+      contentGeneratorConfig,
+      cliConfig,
+    );
+  }
+
   // Default provider for standard Anthropic-compatible APIs
   return new DefaultAnthropicCompatibleProvider(
     contentGeneratorConfig,

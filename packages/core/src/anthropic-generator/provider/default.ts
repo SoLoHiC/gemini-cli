@@ -63,24 +63,51 @@ export class DefaultAnthropicCompatibleProvider
     } as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
     const samplingParams = this.contentGeneratorConfig.samplingParams;
 
-    if (samplingParams?.temperature !== undefined && mergedRequest.temperature === undefined) {
+    if (
+      samplingParams?.temperature !== undefined &&
+      mergedRequest.temperature === undefined
+    ) {
       mergedRequest.temperature = samplingParams.temperature;
     }
-    if (samplingParams?.top_p !== undefined && mergedRequest.top_p === undefined) {
+    if (
+      samplingParams?.top_p !== undefined &&
+      mergedRequest.top_p === undefined
+    ) {
       mergedRequest.top_p = samplingParams.top_p;
     }
-    if (samplingParams?.top_k !== undefined && mergedRequest.top_k === undefined) {
+    if (
+      samplingParams?.top_k !== undefined &&
+      mergedRequest.top_k === undefined
+    ) {
       mergedRequest.top_k = samplingParams.top_k;
     }
-    if (samplingParams?.max_tokens !== undefined && mergedRequest.max_tokens === undefined) {
+    if (
+      samplingParams?.max_tokens !== undefined &&
+      mergedRequest.max_tokens === undefined
+    ) {
       mergedRequest.max_tokens = samplingParams.max_tokens;
+    }
+    if (
+      this.contentGeneratorConfig.thinking !== undefined &&
+      mergedRequest['thinking'] === undefined
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      mergedRequest['thinking'] = this.contentGeneratorConfig
+        .thinking as unknown as Anthropic.ThinkingConfigParam;
     }
     if (
       this.contentGeneratorConfig.reasoning !== undefined &&
       mergedRequest['thinking'] === undefined
     ) {
-      mergedRequest['thinking'] =
-        this.contentGeneratorConfig.reasoning as unknown as Anthropic.ThinkingConfigParam;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      mergedRequest['thinking'] = this.contentGeneratorConfig
+        .reasoning as unknown as Anthropic.ThinkingConfigParam;
+    }
+    if (
+      this.contentGeneratorConfig.outputConfig !== undefined &&
+      mergedRequest['output_config'] === undefined
+    ) {
+      mergedRequest['output_config'] = this.contentGeneratorConfig.outputConfig;
     }
     if (typeof mergedRequest.max_tokens === 'number') {
       const outputLimit = tokenLimit(

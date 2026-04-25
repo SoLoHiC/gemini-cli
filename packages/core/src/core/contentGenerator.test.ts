@@ -1115,4 +1115,42 @@ describe('createContentGeneratorConfig', () => {
     );
     expect(config.providerSubtype).toBe('dashscope-openai');
   });
+
+  it('should configure Anthropic provider auth with official thinking fields', async () => {
+    vi.mocked(mockConfig.getModel).mockReturnValue('deepseek-v4-pro');
+    vi.mocked(mockConfig.getModelProvidersConfig).mockReturnValue({
+      anthropic: [
+        {
+          id: 'deepseek-v4-pro',
+          envKey: 'DEEPSEEK_API_KEY',
+          baseUrl: 'https://api.deepseek.com/anthropic',
+          generationConfig: {
+            timeout: 90000,
+            maxRetries: 2,
+            thinking: {
+              type: 'enabled',
+            },
+            outputConfig: {
+              effort: 'low',
+            },
+          },
+        },
+      ],
+    });
+    vi.stubEnv('DEEPSEEK_API_KEY', 'deepseek-test-key');
+
+    const config = await createContentGeneratorConfig(
+      mockConfig,
+      AuthType.USE_ANTHROPIC,
+    );
+
+    expect(config.apiKey).toBe('deepseek-test-key');
+    expect(config.apiKeyEnvKey).toBe('DEEPSEEK_API_KEY');
+    expect(config.baseUrl).toBe('https://api.deepseek.com/anthropic');
+    expect(config.timeout).toBe(90000);
+    expect(config.maxRetries).toBe(2);
+    expect(config.thinking).toEqual({ type: 'enabled' });
+    expect(config.outputConfig).toEqual({ effort: 'low' });
+    expect(config.providerSubtype).toBe('deepseek-anthropic');
+  });
 });

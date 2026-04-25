@@ -127,5 +127,139 @@ describe('DeepSeekAnthropicCompatibleProvider', () => {
 
       expect(result.temperature).toBe(1.5);
     });
+
+    it('maps official Anthropic config names into the request', () => {
+      provider = new DeepSeekAnthropicCompatibleProvider(
+        {
+          ...mockContentGeneratorConfig,
+          model: 'deepseek-v4-pro',
+          thinking: { type: 'enabled' },
+          outputConfig: { effort: 'low' },
+        } as ContentGeneratorConfig,
+        mockCliConfig,
+      );
+
+      const originalRequest: Anthropic.Messages.MessageCreateParams = {
+        model: 'deepseek-v4-pro',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'Hello' }],
+      };
+
+      const result = provider.buildRequest(
+        originalRequest,
+        userPromptId,
+      ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+      expect(result['thinking']).toEqual({ type: 'enabled' });
+      expect(result['output_config']).toEqual({ effort: 'low' });
+    });
+
+    it('auto-injects thinking and default effort for V4 models', () => {
+      const originalRequest: Anthropic.Messages.MessageCreateParams = {
+        model: 'deepseek-v4-pro',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'Hello' }],
+      };
+
+      const result = provider.buildRequest(
+        originalRequest,
+        userPromptId,
+      ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+      expect(result['thinking']).toEqual({ type: 'enabled' });
+      expect(result['output_config']).toEqual({ effort: 'high' });
+    });
+
+    it('does not inject output_config when thinking is explicitly disabled', () => {
+      const originalRequest: Anthropic.Messages.MessageCreateParams &
+        Record<string, unknown> = {
+        model: 'deepseek-v4-flash',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'Hello' }],
+        thinking: { type: 'disabled' },
+      };
+
+      const result = provider.buildRequest(
+        originalRequest,
+        userPromptId,
+      ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+      expect(result['thinking']).toEqual({ type: 'disabled' });
+      expect(result['output_config']).toBeUndefined();
+    });
+
+    it('does not auto-inject thinking for non-V4 models', () => {
+      const originalRequest: Anthropic.Messages.MessageCreateParams &
+        Record<string, unknown> = {
+        model: 'deepseek-chat',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'Hello' }],
+      };
+
+      const result = provider.buildRequest(
+        originalRequest,
+        userPromptId,
+      ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+      expect(result['thinking']).toBeUndefined();
+      expect(result['output_config']).toBeUndefined();
+    });
+
+    it('preserves user-specified thinking and output_config for V4 models', () => {
+      const originalRequest = {
+        model: 'deepseek-v4-pro',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: 'Hello' }],
+        thinking: { type: 'enabled' } as Anthropic.Messages.ThinkingConfigParam,
+        output_config: { effort: 'max' },
+      } as unknown as Anthropic.Messages.MessageCreateParams &
+        Record<string, unknown>;
+
+      const result = provider.buildRequest(
+        originalRequest as Anthropic.Messages.MessageCreateParams,
+        userPromptId,
+      ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+      expect(result['thinking']).toEqual({ type: 'enabled' });
+      expect(result['output_config']).toEqual({ effort: 'max' });
+    });
+
+    describe('thinking detection', () => {
+      it('treats absent thinking config as not disabled and not enabled', () => {
+        const originalRequest: Anthropic.Messages.MessageCreateParams = {
+          model: 'deepseek-chat',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: 'Hello' }],
+        };
+
+        // Non-V4: no auto-injection, no thinking modifications
+        const result = provider.buildRequest(
+          originalRequest,
+          userPromptId,
+        ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+        expect(result['thinking']).toBeUndefined();
+      });
+
+      it('treats thinking type enabled as active thinking', () => {
+        const originalRequest = {
+          model: 'deepseek-v4-pro',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: 'Hello' }],
+          thinking: { type: 'enabled' } as Anthropic.Messages.ThinkingConfigParam,
+        } as unknown as Anthropic.Messages.MessageCreateParams &
+          Record<string, unknown>;
+
+        const result = provider.buildRequest(
+          originalRequest as Anthropic.Messages.MessageCreateParams,
+          userPromptId,
+        ) as Anthropic.Messages.MessageCreateParams & Record<string, unknown>;
+
+        // Config should be preserved (not auto-injected since already set)
+        expect(result['thinking']).toEqual({ type: 'enabled' });
+        // output_config should still be auto-injected since it's undefined
+        expect(result['output_config']).toEqual({ effort: 'high' });
+      });
+    });
   });
 });

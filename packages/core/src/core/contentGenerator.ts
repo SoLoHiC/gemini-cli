@@ -147,6 +147,9 @@ export type ContentGeneratorConfig = {
   enableOpenAILogging?: boolean;
   disableCacheControl?: boolean;
   reasoning?: Record<string, unknown>;
+  reasoningEffort?: string;
+  thinking?: Record<string, unknown>;
+  outputConfig?: Record<string, unknown>;
   schemaCompliance?: Record<string, unknown>;
   contextWindowSize?: number;
   extra_body?: Record<string, unknown>;
@@ -351,6 +354,9 @@ export async function createContentGeneratorConfig(
       enableCacheControl: providerGenerationConfig?.enableCacheControl,
       samplingParams: providerGenerationConfig?.samplingParams,
       reasoning: providerGenerationConfig?.reasoning,
+      reasoningEffort: providerGenerationConfig?.reasoningEffort,
+      thinking: providerGenerationConfig?.thinking,
+      outputConfig: providerGenerationConfig?.outputConfig,
       schemaCompliance: providerGenerationConfig?.schemaCompliance,
       contextWindowSize: providerGenerationConfig?.contextWindowSize,
       customHeaders: {

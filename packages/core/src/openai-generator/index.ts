@@ -61,6 +61,15 @@ export function determineProvider(
     );
   }
 
+  // Also detect DeepSeek models by name to support third-party providers
+  // hosting DeepSeek V4 under their own base URL (e.g., OpenRouter, Together AI)
+  if (DeepSeekOpenAICompatibleProvider.isDeepSeekModel(config)) {
+    return new DeepSeekOpenAICompatibleProvider(
+      contentGeneratorConfig,
+      cliConfig,
+    );
+  }
+
   if (DashScopeOpenAICompatibleProvider.isDashScopeProvider(config)) {
     return new DashScopeOpenAICompatibleProvider(
       contentGeneratorConfig,
